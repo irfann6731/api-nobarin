@@ -49,9 +49,10 @@ HOST_URL = f"{HOST_PROTOCOL}://{SELECTED_HOST}/"
 logger.info(f"Moviebox host url - {HOST_URL}")
 
 DEFAULT_REQUEST_HEADERS = {
-    "X-Client-Info": '{"timezone":"Africa/Nairobi"}',
+    "X-Client-Info": '{"timezone":"Asia/Jakarta"}',
+    "upstream": "indonesia",
     # TODO: Set this value dynamically.
-    "Accept-Language": "en-US,en;q=0.5",
+    "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.5",
     "Accept": "application/json",
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:137.0) Gecko/20100101 "
     "Firefox/137.0",

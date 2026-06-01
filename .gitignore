@@ -222,3 +222,4 @@ temp/
 research*.json
 assets/data/movie.page
 assets/data/tv_series.page
+.vercel

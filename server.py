@@ -1584,7 +1584,7 @@ async def artplayer_page(
         const isPlaying = art.playing;
         
         art.switchUrl(url);
-        art.once('ready', () => {{
+        art.once('video:loadedmetadata', () => {{
           art.currentTime = currentTime;
           if (isPlaying) {{
             art.play().catch(() => {{}});

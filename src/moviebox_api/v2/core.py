@@ -4,6 +4,8 @@ Generate models from httpx request responses.
 Also provides object mapping support to specific extracted item details
 """
 
+import os
+
 from typing_extensions import deprecated
 
 import moviebox_api.v1.core
@@ -25,7 +27,11 @@ from moviebox_api.v2.requests import Session
 
 
 class Homepage(moviebox_api.v1.core.Homepage):
-    _url = get_absolute_url("/wefeed-h5api-bff/home?host=moviebox.ph")
+    # host= parameter menentukan konten regional dari upstream.
+    # moviebox.ph → Filipino, moviebox.id → Indonesian, dll.
+    # Konfigurasi via env MOVIEBOX_SITE_HOST (default: moviebox.id).
+    _site_host = os.environ.get("MOVIEBOX_SITE_HOST", "moviebox.id")
+    _url = get_absolute_url(f"/wefeed-h5api-bff/home?host={_site_host}")
 
     async def get_content_model(self) -> HomepageContentModel:
         """Modelled version of the contents"""
