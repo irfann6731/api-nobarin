@@ -189,6 +189,38 @@ DETAIL_CACHE_TTL = 3600
 media_cache = {}
 MEDIA_CACHE_TTL = 300
 
+# ── V3 Mock Models for V2 Compatibility ─────────────────────────────────────────
+class MockMediaFile:
+    def __init__(self, resolution, url, size):
+        self.resolution = resolution
+        self.url = url
+        self.size = size
+
+class MockCaptionFile:
+    def __init__(self, id_val, lan, lanName, url):
+        self.id = id_val
+        self.lan = lan
+        self.lanName = lanName
+        self.url = url
+
+class MockMediaDetail:
+    def __init__(self, downloads, captions):
+        self.downloads = downloads
+        self.captions = captions
+        
+    @property
+    def best_media_file(self):
+        if self.downloads:
+            return max(self.downloads, key=lambda x: x.resolution)
+        return None
+        
+    def get_media_file_by_resolution(self, resolution):
+        for dl in self.downloads:
+            if dl.resolution == resolution:
+                return dl
+        return self.best_media_file
+
+
 async def get_cached_detail(detailPath: str):
     import time
     now = time.time()
@@ -197,9 +229,55 @@ async def get_cached_detail(detailPath: str):
         if (now - entry["timestamp"]) < DETAIL_CACHE_TTL:
             return entry["data"]
             
-    session = get_global_session()
-    det = ItemDetails(session)
-    details = await det.get_content_model(detailPath)
+    if detailPath.startswith("subject-"):
+        # Fetch using V3 API
+        subject_id = detailPath.split("-")[-1]
+        from moviebox_api.v3.http_client import MovieBoxHttpClient
+        from moviebox_api.v3.core import ItemDetails as V3ItemDetails
+        
+        async with MovieBoxHttpClient() as v3_client:
+            det = V3ItemDetails(v3_client, include_seasons=True)
+            v3_details = await det.get_content_model(subject_id)
+            
+            # Map V3 RootItemDetailsModel to a structure compatible with V2 SpecificItemDetailsModel
+            class MockSubject:
+                def __init__(self, v3_subj):
+                    self.genre = v3_subj.genre
+                    self.subjectType = v3_subj.subject_type
+                    self.title = v3_subj.title
+                    self.cover = v3_subj.cover
+                    self.description = v3_subj.description
+                    self.releaseDate = v3_subj.release_date
+                    self.imdbRatingValue = v3_subj.imdb_rating_value
+                    self.countryName = v3_subj.country_name
+
+            class MockSeason:
+                def __init__(self, se, max_ep):
+                    self.se = se
+                    self.maxEp = max_ep
+
+            class MockResource:
+                def __init__(self, v3_seasons):
+                    self.seasons = [MockSeason(s.se, s.max_ep) for s in v3_seasons.seasons] if v3_seasons else []
+
+            class MockStar:
+                def __init__(self, staff):
+                    self.name = staff.name
+                    self.character = staff.character
+                    self.avatarUrl = staff.avatar_url
+
+            class MockDetails:
+                def __init__(self, v3_d):
+                    self.subject = MockSubject(v3_d)
+                    self.resource = MockResource(v3_d.seasons)
+                    self.stars = [MockStar(s) for s in v3_d.staff_list] if v3_d.staff_list else []
+            
+            details = MockDetails(v3_details)
+    else:
+        session = get_global_session()
+        det = ItemDetails(session)
+        details = await det.get_content_model(detailPath)
+        
     detail_cache[detailPath] = {
         "data": details,
         "timestamp": now
@@ -215,16 +293,57 @@ async def get_cached_media_detail(detailPath: str, season: int = None, episode: 
         if (now - entry["timestamp"]) < MEDIA_CACHE_TTL:
             return entry["data"]
             
-    session = get_global_session()
-    details = await get_cached_detail(detailPath)
-    if is_tv:
-        dl = DownloadableTVSeriesFilesDetail(session, details.subject)
-        s = season if season is not None else 1
-        ep = episode if episode is not None else 1
-        dl_meta = await dl.get_content_model(season=s, episode=ep)
+    if detailPath.startswith("subject-"):
+        # Fetch using V3 API directly
+        subject_id = detailPath.split("-")[-1]
+        from moviebox_api.v3.http_client import MovieBoxHttpClient
+        
+        async with MovieBoxHttpClient() as v3_client:
+            params = {"subjectId": subject_id}
+            if is_tv:
+                params["se"] = season if season is not None else 1
+                params["ep"] = episode if episode is not None else 1
+                
+            res_data = await v3_client.get_from_api("/wefeed-mobile-bff/subject-api/resource", params=params)
+            video_list = res_data.get("list", [])
+            
+            # Build mock downloads list
+            downloads = []
+            for item in video_list:
+                res_val = item.get("resolution", 720)
+                url_val = item.get("resourceLink")
+                size_val = item.get("size", 0)
+                downloads.append(MockMediaFile(res_val, url_val, size_val))
+                
+            captions = []
+            if video_list:
+                best_res_id = video_list[0].get("resourceId")
+                cap_params = {"subjectId": subject_id, "resourceId": best_res_id}
+                try:
+                    cap_data = await v3_client.get_from_api("/wefeed-mobile-bff/subject-api/get-ext-captions", params=cap_params)
+                    ext_captions = cap_data.get("extCaptions", [])
+                    for cap in ext_captions:
+                        captions.append(MockCaptionFile(
+                            id_val=cap.get("id"),
+                            lan=cap.get("lan"),
+                            lanName=cap.get("lanName"),
+                            url=cap.get("url")
+                        ))
+                except Exception as e:
+                    logger.warning(f"Error fetching V3 captions: {e}")
+                    
+            dl_meta = MockMediaDetail(downloads, captions)
     else:
-        dl = DownloadableMovieFilesDetail(session, details.subject)
-        dl_meta = await dl.get_content_model()
+        session = get_global_session()
+        details = await get_cached_detail(detailPath)
+        if is_tv:
+            dl = DownloadableTVSeriesFilesDetail(session, details.subject)
+            s = season if season is not None else 1
+            ep = episode if episode is not None else 1
+            dl_meta = await dl.get_content_model(season=s, episode=ep)
+        else:
+            dl = DownloadableMovieFilesDetail(session, details.subject)
+            dl_meta = await dl.get_content_model()
         
     media_cache[key] = {
         "data": dl_meta,
@@ -305,7 +424,11 @@ async def execute_search(query_str: str, subj_type, page: int = 1):
                     rating = str(m_item.imdb_rating_value) if m_item.imdb_rating_value else "N/A"
                     year = str(m_item.release_date.year) if m_item.release_date else ""
                     poster = str(m_item.cover.url) if m_item.cover and m_item.cover.url else ""
-                    detail_path = str(m_item.detail_url).split("/detail/")[-1] if m_item.detail_url and "/detail/" in str(m_item.detail_url) else ""
+                    detail_path = ""
+                    if m_item.detail_url and "/detail/" in str(m_item.detail_url):
+                        detail_path = str(m_item.detail_url).split("/detail/")[-1]
+                    elif m_item.subject_id:
+                        detail_path = f"subject-{m_item.subject_id}"
                     genres = m_item.genre or []
                     
                     formatted_items.append({
