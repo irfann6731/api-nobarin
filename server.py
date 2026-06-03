@@ -97,7 +97,7 @@ app.add_middleware(
 async def shutdown_event():
     global _global_session
     if _global_session is not None:
-        await _global_session.aclose()
+        await _global_session._client.aclose()
 
 @app.middleware("http")
 async def add_cache_control_header(request: Request, call_next):
@@ -2655,6 +2655,114 @@ async def play_movie(detailPath: str, request: Request):
 @app.api_route("/api/v1/play/{detailPath}/{season}/{episode}/video.mp4", methods=["GET", "HEAD"])
 async def play_episode(detailPath: str, season: int, episode: int, request: Request):
     return await play_episode_media(detailPath, season, episode, request)
+
+
+# ── Telegram Bot Webhook Endpoint ─────────────────────────────────────────────
+@app.post("/api/v1/telegram-webhook")
+async def telegram_webhook(request: Request):
+    import html
+    
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"success": False, "error": "Invalid JSON"})
+        
+    message = data.get("message")
+    if not message:
+        return {"success": True}
+        
+    chat = message.get("chat")
+    if not chat:
+        return {"success": True}
+        
+    chat_id = chat.get("id")
+    text = message.get("text", "").strip()
+    
+    if not text:
+        return {"success": True}
+        
+    # Command /start
+    if text == "/start":
+        welcome_text = (
+            "👋 <b>Halo! Selamat datang di Nobarin Bot.</b>\n\n"
+            "Gunakan perintah <code>!s &lt;judul film&gt;</code> atau <code>/search &lt;judul film&gt;</code> untuk mencari film/serial TV.\n\n"
+            "Contoh:\n"
+            "<code>!s pretty little liar</code>"
+        )
+        await send_telegram_message(chat_id, welcome_text)
+        
+    # Command !s atau /search
+    elif text.startswith("!s ") or text.startswith("/search "):
+        query_str = ""
+        if text.startswith("!s "):
+            query_str = text[3:].strip()
+        elif text.startswith("/search "):
+            query_str = text[8:].strip()
+            
+        if not query_str:
+            await send_telegram_message(chat_id, "⚠️ Silakan masukkan judul film. Contoh: <code>!s pretty little liar</code>")
+            return {"success": True}
+            
+        try:
+            items = await execute_search(query_str, SubjectType.ALL, page=1)
+            
+            if not items:
+                await send_telegram_message(chat_id, f"❌ Tidak ditemukan hasil untuk <b>{html.escape(query_str)}</b>.")
+                return {"success": True}
+                
+            # Ambil maksimal 10 item untuk ditampilkan
+            results_to_show = items[:10]
+            total_found = len(items)
+            
+            response_text = f"🔍 <b>Results for {html.escape(query_str)} ({len(results_to_show)} of {total_found}):</b>\n\n"
+            
+            # Gunakan URL website Nobarin dari env (default ke nobarin.netlify.app)
+            website_url = os.getenv("NOBARIN_WEBSITE_URL", "https://nobarin.netlify.app").rstrip("/")
+            
+            for idx, item in enumerate(results_to_show, 1):
+                title = html.escape(item.get("title", "Unknown"))
+                year = item.get("year", "")
+                year_str = f" ({year})" if year else ""
+                
+                item_type = "TV" if item.get("type") == "tv" else "Movie"
+                detail_path = item.get("detailPath", "")
+                
+                # Format URL Detail/Watch sesuai struktur website Nobarin Anda
+                watch_link = f"{website_url}/nonton/{detail_path}" if detail_path else "#"
+                
+                response_text += f"{idx}. <b>{title}</b>{year_str} - <i>{item_type}</i>\n"
+                response_text += f"🔗 <a href='{watch_link}'>Nonton di Nobarin</a>\n\n"
+                
+            await send_telegram_message(chat_id, response_text)
+            
+        except Exception as e:
+            logger.error(f"Error in telegram search webhook: {e}")
+            await send_telegram_message(chat_id, f"⚠️ Terjadi kesalahan saat mencari film: {html.escape(str(e))}")
+            
+    return {"success": True}
+
+async def send_telegram_message(chat_id: int, text: str):
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not bot_token:
+        logger.error("TELEGRAM_BOT_TOKEN environment variable not set")
+        return
+        
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
+    }
+    
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            resp = await client.post(url, json=payload)
+            if resp.status_code != 200:
+                logger.error(f"Failed to send Telegram message: {resp.text}")
+        except Exception as e:
+            logger.error(f"Error sending Telegram message: {e}")
+
 
 if __name__ == "__main__":
     import uvicorn
