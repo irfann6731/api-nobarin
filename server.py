@@ -268,6 +268,61 @@ def format_item(item):
         "genres": genres
     }
 
+async def execute_search(query_str: str, subj_type, page: int = 1):
+    """
+    Melakukan pencarian dengan fallback ke V3 API jika V2 API (h5-api) down/error/400.
+    """
+    try:
+        # Coba V2 Search terlebih dahulu
+        session = get_global_session()
+        search_inst = Search(session, query=query_str, subject_type=subj_type, page=page)
+        search_res = await search_inst.get_content_model()
+        return [format_item(item) for item in search_res.items]
+    except Exception as e:
+        logger.warning("[Search] V2 Search failed for '%s' (error: %s). Falling back to V3 Search...", query_str, str(e))
+        try:
+            # Fallback ke V3 Search (Android App API)
+            from moviebox_api.v3.http_client import MovieBoxHttpClient
+            from moviebox_api.v3.core import Search as V3Search
+            from moviebox_api.v3.constants import SubjectType as V3SubjectType
+            
+            # Map V2 SubjectType to V3 SubjectType
+            v3_subject_type = V3SubjectType(int(subj_type))
+            
+            async with MovieBoxHttpClient() as v3_client:
+                v3_search_inst = V3Search(
+                    v3_client,
+                    query=query_str,
+                    subject_type=v3_subject_type,
+                    page=page
+                )
+                v3_res_model = await v3_search_inst.get_content_model()
+                
+                formatted_items = []
+                for m_item in v3_res_model.items:
+                    subject_type_val = int(m_item.subject_type)
+                    item_type = "tv" if subject_type_val in (2, 7) else "movie"
+                    rating = str(m_item.imdb_rating_value) if m_item.imdb_rating_value else "N/A"
+                    year = str(m_item.release_date.year) if m_item.release_date else ""
+                    poster = str(m_item.cover.url) if m_item.cover and m_item.cover.url else ""
+                    detail_path = str(m_item.detail_url).split("/detail/")[-1] if m_item.detail_url and "/detail/" in str(m_item.detail_url) else ""
+                    genres = m_item.genre or []
+                    
+                    formatted_items.append({
+                        "title": m_item.title,
+                        "poster": poster,
+                        "year": year,
+                        "detailPath": detail_path,
+                        "rating": rating,
+                        "type": item_type,
+                        "genres": genres
+                    })
+                logger.info("[Search] V3 Search fallback successful! Found %d items.", len(formatted_items))
+                return formatted_items
+        except Exception as v3_err:
+            logger.error("[Search] V3 Search fallback also failed: %s", str(v3_err))
+            raise RuntimeError(f"Both V2 and V3 search failed. V2 error: {e}. V3 error: {v3_err}")
+
 async def fetch_category_items(action: str, page: int = 1, bypass_cache: bool = False):
     if page == 1:
         content = await get_cached_homepage(bypass_cache=bypass_cache)
@@ -299,10 +354,7 @@ async def fetch_category_items(action: str, page: int = 1, bypass_cache: bool = 
     fallback = SEARCH_FALLBACK_MAP.get(action)
     if fallback:
         query_str, subj_type = fallback
-        session = get_global_session()
-        search_inst = Search(session, query=query_str, subject_type=subj_type, page=page)
-        search_res = await search_inst.get_content_model()
-        return [format_item(item) for item in search_res.items]
+        return await execute_search(query_str, subj_type, page=page)
         
     return []
 
@@ -1208,12 +1260,9 @@ async def get_indo_dub(page: int = 1):
 @app.get("/api/v1/search")
 async def get_search(q: str = "*", page: int = 1):
     try:
-        session = get_global_session()
         # Default to ALL if no query is given, otherwise search
         query_str = q if q != "*" else "movie"
-        search_inst = Search(session, query=query_str, subject_type=SubjectType.ALL, page=page)
-        search_res = await search_inst.get_content_model()
-        items = [format_item(item) for item in search_res.items]
+        items = await execute_search(query_str, SubjectType.ALL, page=page)
         return {"success": True, "items": items}
     except Exception as e:
         return {"success": False, "items": [], "error": str(e)}
