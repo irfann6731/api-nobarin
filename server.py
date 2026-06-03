@@ -356,7 +356,7 @@ def format_item(item):
     subject_type_val = item.subjectType.value if hasattr(item.subjectType, 'value') else int(item.subjectType)
     
     # Map SubjectType to "tv" or "movie"
-    if subject_type_val == 2 or subject_type_val == 7: # TV_SERIES or ANIME
+    if subject_type_val in (2, 7, 8): # TV_SERIES, ANIME or SHORT_TV
         item_type = "tv"
     else:
         item_type = "movie"
@@ -420,7 +420,7 @@ async def execute_search(query_str: str, subj_type, page: int = 1):
                 formatted_items = []
                 for m_item in v3_res_model.items:
                     subject_type_val = int(m_item.subject_type)
-                    item_type = "tv" if subject_type_val in (2, 7) else "movie"
+                    item_type = "tv" if subject_type_val in (2, 7, 8) else "movie"
                     rating = str(m_item.imdb_rating_value) if m_item.imdb_rating_value else "N/A"
                     year = str(m_item.release_date.year) if m_item.release_date else ""
                     poster = str(m_item.cover.url) if m_item.cover and m_item.cover.url else ""
