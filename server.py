@@ -21,9 +21,12 @@ os.environ.setdefault("REGION", "ID")
 os.environ.setdefault("LOCALE", "id-ID")
 # ─────────────────────────────────────────────────────────────────────────────
 
-from fastapi import FastAPI, Query, HTTPException, Request
+from fastapi import FastAPI, Query, HTTPException, Request, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, HTMLResponse, StreamingResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
+from fastapi.openapi.utils import get_openapi
 import httpx
 from urllib.parse import quote
 
@@ -72,7 +75,13 @@ def get_global_session() -> Session:
     return _global_session
 # ─────────────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="Moviebox Local API Server", version="1.0.0")
+app = FastAPI(
+    title="Moviebox Local API Server",
+    version="1.0.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None
+)
 
 # Enable CORS for frontend clients (Astro app)
 app.add_middleware(
@@ -296,99 +305,36 @@ async def fetch_category_items(action: str, page: int = 1, bypass_cache: bool = 
         
     return []
 
+security = HTTPBasic()
+
+def authenticate(credentials: HTTPBasicCredentials = Depends(security)):
+    correct_username = "Trico"
+    correct_password = "Kucing-ku-namanya-Trico"
+    if credentials.username != correct_username or credentials.password != correct_password:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
+
+@app.get("/docs", include_in_schema=False)
+async def get_swagger_documentation(username: str = Depends(authenticate)):
+    return get_swagger_ui_html(openapi_url="/openapi.json", title=app.title)
+
+@app.get("/redoc", include_in_schema=False)
+async def get_redoc_documentation(username: str = Depends(authenticate)):
+    return get_redoc_html(openapi_url="/openapi.json", title=app.title)
+
+@app.get("/openapi.json", include_in_schema=False)
+async def openapi(username: str = Depends(authenticate)):
+    return get_openapi(title=app.title, version=app.version, routes=app.routes)
+
 @app.get("/")
 async def root():
     return RedirectResponse(url="/docs")
 
 
-# ── Debug endpoint: sementara untuk diagnosa region Vercel ────────────────────
-@app.get("/api/v1/debug-region")
-async def debug_region(request: Request):
-    """Endpoint debug sementara untuk mengecek region, IP, env, dan upstream.
-    Hapus endpoint ini setelah masalah region terselesaikan."""
-    from moviebox_api.v1.constants import HOST_URL as V1_HOST_URL
-    from moviebox_api.v1.constants import SELECTED_HOST as V1_SELECTED_HOST
-    from moviebox_api.v2.constants import HOST_URL as V2_HOST_URL
-    from moviebox_api.v2.constants import SELECTED_HOST as V2_SELECTED_HOST
-
-    # Ambil public IP server
-    public_ip = "unknown"
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get("https://api.ipify.org?format=json")
-            if resp.status_code == 200:
-                public_ip = resp.json().get("ip", "unknown")
-    except Exception as e:
-        public_ip = f"error: {e}"
-
-    # Env variables yang aman ditampilkan (tanpa secret/token)
-    safe_env_keys = [
-        "VERCEL", "VERCEL_REGION", "VERCEL_ENV", "VERCEL_URL",
-        "MOVIEBOX_API_HOST", "MOVIEBOX_API_HOST_V2", "MOVIEBOX_SITE_HOST",
-        "BASE_URL", "API_URL", "REGION", "COUNTRY", "LANG", "LOCALE",
-        "TZ", "PYTHONPATH",
-    ]
-    env_info = {}
-    for key in safe_env_keys:
-        val = os.getenv(key)
-        env_info[key] = val  # None jika tidak diset
-
-    # ── Probe upstream homepage API langsung ──────────────────────────────
-    site_host = os.getenv("MOVIEBOX_SITE_HOST", "moviebox.id")
-    upstream_url = f"{V2_HOST_URL}wefeed-h5api-bff/home?host={site_host}"
-    upstream_status = None
-    upstream_length = None
-    upstream_preview = ""
-    upstream_item_count = None
-    try:
-        async with httpx.AsyncClient(timeout=10.0, headers=INDONESIA_HEADERS) as client:
-            up_resp = await client.get(upstream_url)
-            upstream_status = up_resp.status_code
-            raw_text = up_resp.text
-            upstream_length = len(raw_text)
-            upstream_preview = raw_text[:300]
-            # Coba parse jumlah item dari operatingList
-            try:
-                data = up_resp.json()
-                op_list = data.get("data", {}).get("operatingList", [])
-                upstream_item_count = sum(len(op.get("subjects", [])) for op in op_list)
-            except Exception:
-                upstream_item_count = "parse_error"
-    except Exception as e:
-        upstream_preview = f"error: {e}"
-    # ─────────────────────────────────────────────────────────────────────
-
-    return {
-        "vercel": os.getenv("VERCEL"),
-        "vercel_region": os.getenv("VERCEL_REGION"),
-        "x_vercel_id": request.headers.get("x-vercel-id"),
-        "public_ip": public_ip,
-        "mirror_hosts": {
-            "MOVIEBOX_API_HOST (v1)": V1_SELECTED_HOST,
-            "MOVIEBOX_API_HOST_V2 (v2)": V2_SELECTED_HOST,
-            "v1_host_url": V1_HOST_URL,
-            "v2_host_url": V2_HOST_URL,
-        },
-        "moviebox_site_host": site_host,
-        "final_home_url": upstream_url,
-        "upstream_probe": {
-            "url": upstream_url,
-            "status_code": upstream_status,
-            "response_length": upstream_length,
-            "preview_300_chars": upstream_preview,
-            "total_item_count_in_operatingList": upstream_item_count,
-        },
-        "environment_variables": env_info,
-        "request_headers_subset": {
-            "x-forwarded-for": request.headers.get("x-forwarded-for"),
-            "x-real-ip": request.headers.get("x-real-ip"),
-            "accept-language": request.headers.get("accept-language"),
-        },
-        "upstream_headers_being_sent": {
-            k: v for k, v in INDONESIA_HEADERS.items()
-            if k.lower() not in ("cookie", "authorization")
-        },
-    }
 @app.get("/api/v1/home")
 async def get_home_metadata():
     categories = []
