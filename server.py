@@ -2799,6 +2799,7 @@ async def telegram_webhook(request: Request):
         return {"success": True}
         
     chat_id = chat.get("id")
+    message_thread_id = message.get("message_thread_id")
     text = message.get("text", "").strip()
     
     if not text:
@@ -2812,7 +2813,7 @@ async def telegram_webhook(request: Request):
             "Contoh:\n"
             "<code>!s pretty little liar</code>"
         )
-        await send_telegram_message(chat_id, welcome_text)
+        await send_telegram_message(chat_id, welcome_text, message_thread_id)
         
     # Command !s atau /search
     elif text.startswith("!s ") or text.startswith("/search "):
@@ -2823,14 +2824,14 @@ async def telegram_webhook(request: Request):
             query_str = text[8:].strip()
             
         if not query_str:
-            await send_telegram_message(chat_id, "⚠️ Silakan masukkan judul film. Contoh: <code>!s pretty little liar</code>")
+            await send_telegram_message(chat_id, "⚠️ Silakan masukkan judul film. Contoh: <code>!s pretty little liar</code>", message_thread_id)
             return {"success": True}
             
         try:
             items = await execute_search(query_str, SubjectType.ALL, page=1)
             
             if not items:
-                await send_telegram_message(chat_id, f"❌ Tidak ditemukan hasil untuk <b>{html.escape(query_str)}</b>.")
+                await send_telegram_message(chat_id, f"❌ Tidak ditemukan hasil untuk <b>{html.escape(query_str)}</b>.", message_thread_id)
                 return {"success": True}
                 
             # Ambil maksimal 10 item untuk ditampilkan
@@ -2856,15 +2857,15 @@ async def telegram_webhook(request: Request):
                 response_text += f"{idx}. <b>{title}</b>{year_str} - <i>{item_type}</i>\n"
                 response_text += f"🔗 <a href='{watch_link}'>Nonton di Nobarin</a>\n\n"
                 
-            await send_telegram_message(chat_id, response_text)
+            await send_telegram_message(chat_id, response_text, message_thread_id)
             
         except Exception as e:
             logger.error(f"Error in telegram search webhook: {e}")
-            await send_telegram_message(chat_id, f"⚠️ Terjadi kesalahan saat mencari film: {html.escape(str(e))}")
+            await send_telegram_message(chat_id, f"⚠️ Terjadi kesalahan saat mencari film: {html.escape(str(e))}", message_thread_id)
             
     return {"success": True}
 
-async def send_telegram_message(chat_id: int, text: str):
+async def send_telegram_message(chat_id: int, text: str, message_thread_id: Optional[int] = None):
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not bot_token:
         logger.error("TELEGRAM_BOT_TOKEN environment variable not set")
@@ -2877,7 +2878,9 @@ async def send_telegram_message(chat_id: int, text: str):
         "parse_mode": "HTML",
         "disable_web_page_preview": True
     }
-    
+    if message_thread_id is not None:
+        payload["message_thread_id"] = message_thread_id
+        
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
             resp = await client.post(url, json=payload)
