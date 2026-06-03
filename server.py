@@ -23,7 +23,8 @@ os.environ.setdefault("LOCALE", "id-ID")
 
 from fastapi import FastAPI, Query, HTTPException, Request, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, StreamingResponse, JSONResponse
+from pydantic import BaseModel
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from fastapi.openapi.utils import get_openapi
@@ -305,22 +306,772 @@ async def fetch_category_items(action: str, page: int = 1, bypass_cache: bool = 
         
     return []
 
-security = HTTPBasic()
-
-def authenticate(credentials: HTTPBasicCredentials = Depends(security)):
-    correct_username = "Trico"
-    correct_password = "Kucing-ku-namanya-Trico"
-    if credentials.username != correct_username or credentials.password != correct_password:
+def authenticate(request: Request):
+    session = request.cookies.get("session_token")
+    if session != "moviebox_trico_session":
+        if request.url.path == "/openapi.json":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Unauthorized access"
+            )
+        # Redirect the user to the login page and pass the current path as a redirect parameter
+        redirect_param = quote(str(request.url.path))
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Basic"},
+            status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+            headers={"Location": f"/login?redirect={redirect_param}"}
         )
-    return credentials.username
+    return "Trico"
+
+class LoginPayload(BaseModel):
+    username: str
+    password: str
+
+@app.get("/login", response_class=HTMLResponse, include_in_schema=False)
+async def login_page(request: Request, redirect: str = "/docs"):
+    html_content = """<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login - Nobarin API Docs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-color: #0b0914;
+      --card-bg: rgba(18, 14, 33, 0.7);
+      --primary-color: #7c3aed;
+      --primary-hover: #6d28d9;
+      --accent-color: #a78bfa;
+      --text-main: #ffffff;
+      --text-muted: #94a3b8;
+      --error-color: #f43f5e;
+      --border-color: rgba(124, 58, 237, 0.25);
+    }
+    
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body {
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      font-family: 'Outfit', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow-x: hidden;
+      position: relative;
+    }
+    
+    /* Background gradients */
+    body::before {
+      content: "";
+      position: absolute;
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, rgba(124, 58, 237, 0.15) 0%, rgba(0,0,0,0) 70%);
+      top: -100px;
+      left: -100px;
+      z-index: 0;
+      pointer-events: none;
+    }
+    
+    body::after {
+      content: "";
+      position: absolute;
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, rgba(167, 139, 250, 0.1) 0%, rgba(0,0,0,0) 70%);
+      bottom: -150px;
+      right: -150px;
+      z-index: 0;
+      pointer-events: none;
+    }
+    
+    .login-container {
+      width: 100%;
+      max-width: 440px;
+      padding: 24px;
+      z-index: 10;
+    }
+    
+    .login-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border-color);
+      border-radius: 20px;
+      padding: 40px 32px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5), 0 0 50px rgba(124, 58, 237, 0.05);
+      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
+    }
+    
+    .login-card:hover {
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.6), 0 0 60px rgba(124, 58, 237, 0.1);
+    }
+    
+    .logo-area {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    
+    .logo-title {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      background: linear-gradient(135deg, #ffffff 0%, var(--accent-color) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 8px;
+    }
+    
+    .logo-subtitle {
+      font-size: 14px;
+      color: var(--text-muted);
+      font-weight: 400;
+    }
+    
+    .form-group {
+      margin-bottom: 20px;
+      position: relative;
+    }
+    
+    .form-label {
+      display: block;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      transition: color 0.2s ease;
+    }
+    
+    .input-wrapper {
+      position: relative;
+    }
+    
+    .form-input {
+      width: 100%;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 14px 16px;
+      color: #fff;
+      font-family: inherit;
+      font-size: 15px;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    .form-input:focus {
+      outline: none;
+      background: rgba(255, 255, 255, 0.08);
+      border-color: var(--primary-color);
+      box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.15), 0 4px 12px rgba(124, 58, 237, 0.08);
+    }
+    
+    .btn-submit {
+      width: 100%;
+      background: linear-gradient(135deg, var(--primary-color) 0%, #6d28d9 100%);
+      border: none;
+      border-radius: 12px;
+      padding: 14px;
+      color: #fff;
+      font-family: inherit;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
+      margin-top: 10px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .btn-submit:hover {
+      background: linear-gradient(135deg, #8b5cf6 0%, var(--primary-color) 100%);
+      box-shadow: 0 6px 20px rgba(124, 58, 237, 0.45);
+      transform: translateY(-1px);
+    }
+    
+    .btn-submit:active {
+      transform: translateY(1px);
+      box-shadow: 0 2px 8px rgba(124, 58, 237, 0.2);
+    }
+    
+    .error-container {
+      background: rgba(244, 63, 94, 0.1);
+      border: 1px solid rgba(244, 63, 94, 0.2);
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 20px;
+      font-size: 14px;
+      color: var(--error-color);
+      display: none;
+      align-items: center;
+      gap: 8px;
+      animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both;
+    }
+    
+    @keyframes shake {
+      10%, 90% { transform: translate3d(-1px, 0, 0); }
+      20%, 80% { transform: translate3d(2px, 0, 0); }
+      30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+      40%, 60% { transform: translate3d(4px, 0, 0); }
+    }
+    
+    .loading-spinner {
+      width: 20px;
+      height: 20px;
+      border: 2.5px solid rgba(255, 255, 255, 0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      display: none;
+    }
+    
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="login-container">
+    <div class="login-card">
+      <div class="logo-area">
+        <h1 class="logo-title">Nobarin API</h1>
+        <p class="logo-subtitle">Silakan login untuk mengakses dokumentasi</p>
+      </div>
+      
+      <div class="error-container" id="error-box">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+          <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+        </svg>
+        <span id="error-message">Username atau password salah.</span>
+      </div>
+      
+      <form id="login-form">
+        <div class="form-group">
+          <label class="form-label" for="username">Username</label>
+          <div class="input-wrapper">
+            <input class="form-input" type="text" id="username" required autocomplete="username" autofocus />
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <label class="form-label" for="password">Password</label>
+          <div class="input-wrapper">
+            <input class="form-input" type="password" id="password" required autocomplete="current-password" />
+          </div>
+        </div>
+        
+        <button class="btn-submit" type="submit">
+          <span class="loading-spinner" id="spinner"></span>
+          <span id="btn-text">Masuk</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('login-form');
+    const errorBox = document.getElementById('error-box');
+    const errorMessage = document.getElementById('error-message');
+    const spinner = document.getElementById('spinner');
+    const btnText = document.getElementById('btn-text');
+    
+    const urlParams = new URLSearchParams(window.location.search);
+    const redirectUrl = urlParams.get('redirect') || '/docs';
+    
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorBox.style.display = 'none';
+      
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      
+      spinner.style.display = 'block';
+      btnText.textContent = 'Memproses...';
+      
+      try {
+        const response = await fetch('/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ username, password })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+          window.location.href = redirectUrl;
+        } else {
+          errorMessage.textContent = data.message || 'Username atau password salah.';
+          errorBox.style.display = 'flex';
+          const oldBox = errorBox;
+          const newBox = oldBox.cloneNode(true);
+          oldBox.parentNode.replaceChild(newBox, oldBox);
+        }
+      } catch (err) {
+        errorMessage.textContent = 'Terjadi kesalahan koneksi server.';
+        errorBox.style.display = 'flex';
+      } finally {
+        spinner.style.display = 'none';
+        btnText.textContent = 'Masuk';
+      }
+    });
+  </script>
+</body>
+</html>
+"""
+    return HTMLResponse(content=html_content)
+
+@app.post("/login", include_in_schema=False)
+async def login_api(payload: LoginPayload):
+    if payload.username == "Trico" and payload.password == "Trico2000":
+        response = JSONResponse(content={"success": True})
+        response.set_cookie(
+            key="session_token",
+            value="moviebox_trico_session",
+            httponly=True,
+            samesite="lax",
+            max_age=86400 * 30  # 30 days
+        )
+        return response
+    return JSONResponse(
+        status_code=400,
+        content={"success": False, "message": "Username atau password salah."}
+    )
+
+@app.get("/logout", include_in_schema=False)
+async def logout_api():
+    response = RedirectResponse(url="/login")
+    response.delete_cookie(key="session_token")
+    return response
 
 @app.get("/docs", include_in_schema=False)
 async def get_swagger_documentation(username: str = Depends(authenticate)):
-    return get_swagger_ui_html(openapi_url="/openapi.json", title=app.title)
+    html_content = """<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nobarin - API Documentation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link type="text/css" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+  <style>
+    :root {
+      --bg-color: #0b0914;
+      --card-bg: rgba(18, 14, 33, 0.7);
+      --primary-color: #7c3aed;
+      --primary-hover: #6d28d9;
+      --accent-color: #a78bfa;
+      --text-main: #ffffff;
+      --text-muted: #94a3b8;
+      --border-color: rgba(124, 58, 237, 0.25);
+    }
+
+    body {
+      background-color: var(--bg-color) !important;
+      color: var(--text-main) !important;
+      font-family: 'Outfit', sans-serif !important;
+      margin: 0;
+      padding: 0;
+    }
+
+    /* Custom Header */
+    .custom-header {
+      background: rgba(11, 9, 20, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-color);
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      padding: 16px 24px;
+    }
+
+    .header-content {
+      max-width: 1460px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .header-logo {
+      font-size: 22px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #ffffff 0%, var(--accent-color) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.5px;
+    }
+
+    .btn-logout {
+      background: rgba(244, 63, 94, 0.1);
+      border: 1px solid rgba(244, 63, 94, 0.3);
+      color: #f43f5e;
+      text-decoration: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+    }
+
+    .btn-logout:hover {
+      background: #f43f5e;
+      color: #fff;
+      box-shadow: 0 0 12px rgba(244, 63, 94, 0.4);
+    }
+
+    /* Swagger UI Overrides */
+    .swagger-ui {
+      background-color: var(--bg-color) !important;
+      font-family: 'Outfit', sans-serif !important;
+    }
+
+    .swagger-ui .topbar {
+      display: none !important;
+    }
+
+    .swagger-ui .info {
+      margin: 40px 0 20px 0 !important;
+    }
+
+    .swagger-ui .info .title {
+      color: var(--text-main) !important;
+      font-family: 'Outfit', sans-serif !important;
+      font-size: 36px !important;
+    }
+
+    .swagger-ui .info p, .swagger-ui .info li, .swagger-ui .info td, .swagger-ui .info a {
+      color: var(--text-muted) !important;
+    }
+
+    .swagger-ui .scheme-container {
+      background-color: var(--card-bg) !important;
+      border: 1px solid var(--border-color) !important;
+      border-radius: 16px !important;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 10px 25px rgba(0,0,0,0.3) !important;
+      padding: 20px !important;
+      margin: 20px 0 !important;
+    }
+
+    .swagger-ui .opblock-tag-section {
+      font-family: 'Outfit', sans-serif !important;
+    }
+
+    .swagger-ui .opblock-tag {
+      color: var(--text-main) !important;
+      border-bottom: 1px solid var(--border-color) !important;
+      font-family: 'Outfit', sans-serif !important;
+    }
+
+    .swagger-ui select {
+      background-color: #1a162b !important;
+      color: var(--text-main) !important;
+      border: 1px solid var(--border-color) !important;
+      border-radius: 8px !important;
+      padding: 6px 10px !important;
+    }
+
+    /* Opblocks styling */
+    .swagger-ui .opblock {
+      background: rgba(18, 14, 33, 0.4) !important;
+      border: 1px solid rgba(255, 255, 255, 0.04) !important;
+      border-radius: 12px !important;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+      margin-bottom: 12px !important;
+    }
+
+    .swagger-ui .opblock.opblock-get {
+      border-color: rgba(124, 58, 237, 0.3) !important;
+      background: rgba(124, 58, 237, 0.03) !important;
+    }
+
+    .swagger-ui .opblock.opblock-get .opblock-summary-method {
+      background-color: var(--primary-color) !important;
+      color: #ffffff !important;
+      border-radius: 6px !important;
+    }
+
+    .swagger-ui .opblock.opblock-post {
+      border-color: rgba(167, 139, 250, 0.3) !important;
+      background: rgba(167, 139, 250, 0.03) !important;
+    }
+
+    .swagger-ui .opblock.opblock-post .opblock-summary-method {
+      background-color: var(--accent-color) !important;
+      color: #0b0914 !important;
+      border-radius: 6px !important;
+    }
+
+    .swagger-ui .opblock .opblock-summary-path {
+      color: var(--text-main) !important;
+      font-weight: 600 !important;
+    }
+
+    .swagger-ui .opblock .opblock-summary-description {
+      color: var(--text-muted) !important;
+    }
+
+    /* Response tables & models */
+    .swagger-ui .tabli, .swagger-ui .tab {
+      color: var(--text-muted) !important;
+    }
+
+    .swagger-ui .opblock-description-wrapper p, 
+    .swagger-ui .opblock-external-docs-wrapper p, 
+    .swagger-ui .opblock-title_normal p {
+      color: var(--text-muted) !important;
+    }
+
+    .swagger-ui .btn {
+      background-color: rgba(124, 58, 237, 0.1) !important;
+      color: var(--accent-color) !important;
+      border: 1px solid rgba(124, 58, 237, 0.3) !important;
+      border-radius: 8px !important;
+      transition: all 0.2s ease !important;
+      box-shadow: none !important;
+    }
+
+    .swagger-ui .btn:hover {
+      background-color: var(--primary-color) !important;
+      color: #ffffff !important;
+      box-shadow: 0 0 10px rgba(124, 58, 237, 0.4) !important;
+    }
+
+    .swagger-ui input[type=text] {
+      background-color: #1a162b !important;
+      color: var(--text-main) !important;
+      border: 1px solid var(--border-color) !important;
+      border-radius: 8px !important;
+      padding: 8px 12px !important;
+    }
+
+    .swagger-ui input[type=text]::placeholder {
+      color: rgba(255,255,255,0.3) !important;
+    }
+
+    .swagger-ui table thead tr td, .swagger-ui table thead tr th {
+      color: var(--text-main) !important;
+      border-bottom: 1px solid var(--border-color) !important;
+    }
+
+    .swagger-ui .parameter__name {
+      color: var(--text-main) !important;
+    }
+
+    .swagger-ui .parameter__type {
+      color: var(--accent-color) !important;
+    }
+
+    .swagger-ui .responses-table {
+      background-color: transparent !important;
+    }
+
+    .swagger-ui .response-col_status {
+      color: var(--text-main) !important;
+    }
+
+    .swagger-ui .response-col_links {
+      color: var(--text-muted) !important;
+    }
+
+    .swagger-ui .opblock .opblock-section-header {
+      background: rgba(18, 14, 33, 0.6) !important;
+      border-bottom: 1px solid var(--border-color) !important;
+      color: var(--text-main) !important;
+    }
+    
+    .swagger-ui .opblock .opblock-section-header h4 {
+      color: var(--text-main) !important;
+    }
+    
+    .swagger-ui .tabli.active {
+      border-bottom: 3px solid var(--accent-color) !important;
+      color: var(--accent-color) !important;
+    }
+
+    .swagger-ui .btn.cancel {
+      border-color: rgba(244, 63, 94, 0.4) !important;
+      color: #f43f5e !important;
+      background: rgba(244, 63, 94, 0.1) !important;
+    }
+
+    .swagger-ui .btn.cancel:hover {
+      background: #f43f5e !important;
+      color: #ffffff !important;
+    }
+
+    .swagger-ui .btn.execute {
+      background-color: var(--primary-color) !important;
+      color: #ffffff !important;
+      border: 1px solid var(--primary-color) !important;
+    }
+
+    .swagger-ui .btn.execute:hover {
+      background-color: var(--primary-hover) !important;
+      box-shadow: 0 0 10px rgba(124, 58, 237, 0.5) !important;
+    }
+
+    .swagger-ui section.models {
+      border: 1px solid var(--border-color) !important;
+      border-radius: 16px !important;
+      background: var(--card-bg) !important;
+      margin-top: 40px !important;
+    }
+
+    .swagger-ui section.models h4 {
+      border-bottom: 1px solid var(--border-color) !important;
+      color: var(--text-main) !important;
+    }
+
+    .swagger-ui section.models h4 span {
+      color: var(--text-main) !important;
+    }
+
+    .swagger-ui .model-box {
+      background-color: #120e21 !important;
+      border: 1px solid var(--border-color) !important;
+      border-radius: 8px !important;
+      padding: 12px !important;
+    }
+
+    .swagger-ui .model-box-control {
+      background: transparent !important;
+      color: var(--text-main) !important;
+      border: none !important;
+    }
+
+    .swagger-ui .model-box-control:focus {
+      outline: none !important;
+    }
+
+    .swagger-ui .model-box-control .model-toggle {
+      filter: invert(1) !important; /* Ensure toggle arrow stands out in dark theme */
+    }
+
+    .swagger-ui section.models button.json-schema-2020-12-accordion {
+      background: transparent !important;
+      color: var(--text-main) !important;
+      border: none !important;
+      font-family: 'Outfit', sans-serif !important;
+    }
+
+    .swagger-ui section.models button.json-schema-2020-12-accordion:hover {
+      background: rgba(255, 255, 255, 0.05) !important;
+    }
+
+    .swagger-ui section.models button.json-schema-2020-12-expand-deep-button {
+      background: rgba(124, 58, 237, 0.1) !important;
+      color: var(--accent-color) !important;
+      border: 1px solid rgba(124, 58, 237, 0.3) !important;
+      border-radius: 6px !important;
+      padding: 4px 8px !important;
+      font-size: 12px !important;
+      font-family: 'Outfit', sans-serif !important;
+    }
+
+    .swagger-ui section.models button.json-schema-2020-12-expand-deep-button:hover {
+      background: var(--primary-color) !important;
+      color: #ffffff !important;
+    }
+
+    .swagger-ui .model {
+      color: #e2e8f0 !important;
+    }
+
+    .swagger-ui .prop-type {
+      color: var(--accent-color) !important;
+    }
+
+    .swagger-ui .prop-format {
+      color: var(--text-muted) !important;
+    }
+
+    .swagger-ui .dialog-ux .modal-ux {
+      background-color: #0b0914 !important;
+      border: 1px solid rgba(124, 58, 237, 0.3) !important;
+      border-radius: 16px !important;
+      box-shadow: 0 15px 40px rgba(0, 0, 0, 0.8) !important;
+    }
+
+    .swagger-ui .dialog-ux .modal-ux-header {
+      border-bottom: 1px solid var(--border-color) !important;
+    }
+
+    .swagger-ui .dialog-ux .modal-ux-header h3 {
+      color: var(--text-main) !important;
+    }
+
+    .swagger-ui .dialog-ux .modal-ux-content {
+      color: #e2e8f0 !important;
+    }
+
+    .swagger-ui .model-viewer {
+      background: #0f0b1e !important;
+      border-radius: 8px !important;
+      padding: 10px !important;
+    }
+
+    .swagger-ui .servers-title {
+      color: var(--accent-color) !important;
+    }
+
+    .swagger-ui .copy-to-clipboard {
+      background-color: #1a162b !important;
+      border-radius: 6px !important;
+      border: 1px solid var(--border-color) !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="custom-header">
+    <div class="header-content">
+      <div class="header-logo">Nobarin API Docs</div>
+      <a href="/logout" class="btn-logout">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right:6px; vertical-align:middle;">
+          <path fill-rule="evenodd" d="M10 12.5a.5.5 0 0 1-.5.5h-8a.5.5 0 0 1-.5-.5v-9a.5.5 0 0 1 .5-.5h8a.5.5 0 0 1 .5.5v2a.5.5 0 0 0 1 0v-2A1.5 1.5 0 0 0 9.5 2h-8A1.5 1.5 0 0 0 0 3.5v9A1.5 1.5 0 0 0 1.5 14h8a1.5 1.5 0 0 0 1.5-1.5v-2a.5.5 0 0 0-1 0v2z"/>
+          <path fill-rule="evenodd" d="M15.854 8.354a.5.5 0 0 0 0-.708l-3-3a.5.5 0 0 0-.708.708L14.293 7.5H5.5a.5.5 0 0 0 0 1h8.793l-2.147 2.146a.5.5 0 0 0 .708.708l3-3z"/>
+        </svg>Keluar
+      </a>
+    </div>
+  </div>
+
+  <div id="swagger-ui"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    window.onload = function() {
+      window.ui = SwaggerUIBundle({
+        url: "/openapi.json",
+        dom_id: "#swagger-ui",
+        deepLinking: true,
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIBundle.SwaggerUIStandalonePreset
+        ],
+        layout: "BaseLayout"
+      });
+    };
+  </script>
+</body>
+</html>"""
+    return HTMLResponse(content=html_content)
 
 @app.get("/redoc", include_in_schema=False)
 async def get_redoc_documentation(username: str = Depends(authenticate)):
