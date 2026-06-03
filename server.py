@@ -2790,7 +2790,12 @@ async def telegram_webhook(request: Request):
     except Exception:
         return JSONResponse(status_code=400, content={"success": False, "error": "Invalid JSON"})
         
-    message = data.get("message")
+    message = (
+        data.get("message") 
+        or data.get("channel_post") 
+        or data.get("edited_message") 
+        or data.get("edited_channel_post")
+    )
     if not message:
         return {"success": True}
         
