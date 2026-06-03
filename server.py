@@ -1246,6 +1246,15 @@ async def get_detail(detailPath: str, request: Request):
             media_url = f"{base_url}/api/v1/play-media/{detailPath}"
             player_url = f"{base_url}/api/v1/player?detailPath={detailPath}&url={quote(media_url)}&title={encoded_title}&poster={encoded_poster}"
         
+        cast_list = []
+        if details.stars:
+            for star in details.stars:
+                cast_list.append({
+                    "name": star.name,
+                    "character": star.character,
+                    "avatar": str(star.avatarUrl) if star.avatarUrl else ""
+                })
+
         movie_data = {
             "title": details.subject.title,
             "year": details.subject.releaseDate.year if details.subject.releaseDate else "",
@@ -1254,7 +1263,9 @@ async def get_detail(detailPath: str, request: Request):
             "type": "tv" if is_tv else "movie",
             "genre": genres,
             "rating": str(details.subject.imdbRatingValue) if details.subject.imdbRatingValue else "N/A",
-            "playerUrl": player_url
+            "playerUrl": player_url,
+            "cast": cast_list,
+            "country": details.subject.countryName if hasattr(details.subject, "countryName") else ""
         }
         
         if is_tv and details.resource and details.resource.seasons:
