@@ -2811,7 +2811,7 @@ async def telegram_webhook(request: Request):
             "👋 <b>Halo! Selamat datang di Nobarin Bot.</b>\n\n"
             "Gunakan perintah <code>!s &lt;judul film&gt;</code> atau <code>/search &lt;judul film&gt;</code> untuk mencari film/serial TV.\n\n"
             "Contoh:\n"
-            "<code>!s pretty little liar</code>"
+            "<code>!s avatar</code>"
         )
         await send_telegram_message(chat_id, welcome_text, message_thread_id)
         
@@ -2824,7 +2824,7 @@ async def telegram_webhook(request: Request):
             query_str = text[8:].strip()
             
         if not query_str:
-            await send_telegram_message(chat_id, "⚠️ Silakan masukkan judul film. Contoh: <code>!s pretty little liar</code>", message_thread_id)
+            await send_telegram_message(chat_id, "⚠️ Silakan masukkan judul film. Contoh: <code>!s avatar</code>", message_thread_id)
             return {"success": True}
             
         try:
