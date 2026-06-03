@@ -1483,6 +1483,7 @@ async def artplayer_page(
       font-family: 'Outfit', sans-serif !important;
       font-weight: 500 !important;
       font-size: calc(var(--sub-size-base) * var(--sub-size-scale)) !important;
+      color: var(--sub-color, #ffffff) !important;
       text-shadow: 0 0 4px #000, 0 0 4px #000, 0 0 6px #000, 0 0 6px #000 !important;
       background: transparent !important;
       bottom: 75px !important;
@@ -2104,42 +2105,48 @@ async def artplayer_page(
         }}
         
         // Add native subtitle tracks for iOS native player support
-        const subtitlesList = cfg.subtitles || [];
-        subtitlesList.forEach(sub => {{
-          const track = document.createElement('track');
-          track.kind = 'subtitles';
-          track.label = sub.name;
-          track.srclang = sub.lan;
-          track.src = sub.url;
-          if (sub.url === defaultSubUrl) {{
-            track.default = true;
-          }}
-          video.appendChild(track);
-        }});
-        
-        // Hide all native text tracks initially so they don't double-render inline
-        if (video.textTracks) {{
-          for (let i = 0; i < video.textTracks.length; i++) {{
-            video.textTracks[i].mode = 'hidden';
-          }}
-        }}
-        
-        // Toggle native tracks when entering/exiting native iOS fullscreen
-        video.addEventListener('webkitbeginfullscreen', () => {{
-          for (let i = 0; i < video.textTracks.length; i++) {{
-            if (video.textTracks[i].label === currentSubtitle) {{
-              video.textTracks[i].mode = 'showing';
-            }} else {{
-              video.textTracks[i].mode = 'disabled';
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+        const useNativeTracks = isIOS || isSafari;
+
+        if (useNativeTracks) {{
+          const subtitlesList = cfg.subtitles || [];
+          subtitlesList.forEach(sub => {{
+            const track = document.createElement('track');
+            track.kind = 'subtitles';
+            track.label = sub.name;
+            track.srclang = sub.lan;
+            track.src = sub.url;
+            if (sub.url === defaultSubUrl) {{
+              track.default = true;
+            }}
+            video.appendChild(track);
+          }});
+          
+          // Hide all native text tracks initially so they don't double-render inline
+          if (video.textTracks) {{
+            for (let i = 0; i < video.textTracks.length; i++) {{
+              video.textTracks[i].mode = 'hidden';
             }}
           }}
-        }});
-        
-        video.addEventListener('webkitendfullscreen', () => {{
-          for (let i = 0; i < video.textTracks.length; i++) {{
-            video.textTracks[i].mode = 'hidden';
-          }}
-        }});
+          
+          // Toggle native tracks when entering/exiting native iOS fullscreen
+          video.addEventListener('webkitbeginfullscreen', () => {{
+            for (let i = 0; i < video.textTracks.length; i++) {{
+              if (video.textTracks[i].label === currentSubtitle) {{
+                video.textTracks[i].mode = 'showing';
+              }} else {{
+                video.textTracks[i].mode = 'disabled';
+              }}
+            }}
+          }});
+          
+          video.addEventListener('webkitendfullscreen', () => {{
+            for (let i = 0; i < video.textTracks.length; i++) {{
+              video.textTracks[i].mode = 'hidden';
+            }}
+          }});
+        }}
         
         // Attempt unmuted autoplay
         const playPromise = art.play();
@@ -2180,6 +2187,10 @@ async def artplayer_page(
       
       art.on('play', () => {{
         closeCustomSettings();
+      }});
+
+      art.on('subtitleLoad', () => {{
+        applySubtitleStyles();
       }});
 
       window.art = art;
@@ -2291,7 +2302,10 @@ async def artplayer_page(
         const currentTime = art.currentTime;
         const isPlaying = art.playing;
         
-        art.switchUrl(url);
+        const activeSub = subtitles.find(sub => sub.name === currentSubtitle);
+        const activeSubUrl = activeSub ? activeSub.url : '';
+        
+        art.switchUrl(url, activeSubUrl);
         art.once('video:loadedmetadata', () => {{
           art.currentTime = currentTime;
           if (isPlaying) {{
@@ -2341,14 +2355,20 @@ async def artplayer_page(
         }}
         
         // Also update the active native track for iOS native player
-        const video = art.video;
-        if (video && video.textTracks) {{
-          for (let i = 0; i < video.textTracks.length; i++) {{
-            if (video.textTracks[i].label === name) {{
-              const inNativeFullscreen = document.webkitFullscreenElement === video || video.webkitDisplayingFullscreen;
-              video.textTracks[i].mode = inNativeFullscreen ? 'showing' : 'hidden';
-            }} else {{
-              video.textTracks[i].mode = 'disabled';
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+        const useNativeTracks = isIOS || isSafari;
+        
+        if (useNativeTracks) {{
+          const video = art.video;
+          if (video && video.textTracks) {{
+            for (let i = 0; i < video.textTracks.length; i++) {{
+              if (video.textTracks[i].label === name) {{
+                const inNativeFullscreen = document.webkitFullscreenElement === video || video.webkitDisplayingFullscreen;
+                video.textTracks[i].mode = inNativeFullscreen ? 'showing' : 'hidden';
+              }} else {{
+                video.textTracks[i].mode = 'disabled';
+              }}
             }}
           }}
         }}
@@ -2405,15 +2425,11 @@ async def artplayer_page(
         const colorHex = subtitleColors[currentColor] || '#ffffff';
         
         document.documentElement.style.setProperty('--sub-size-scale', scale);
+        document.documentElement.style.setProperty('--sub-color', colorHex);
         
         art.subtitle.style({{
           color: colorHex
         }});
-        
-        const subEl = document.querySelector('.art-subtitle');
-        if (subEl) {{
-          subEl.style.color = colorHex;
-        }}
       }}
 
       // Init menus
@@ -2465,16 +2481,46 @@ async def proxy_stream_url(url: str, request: Request):
         "Referer": "https://videodownloader.site/",
     }
 
-    # Forward the Range header so seeking, duration, and 10-second skip work properly.
+    method = request.method
     range_header = request.headers.get("range")
-    if range_header:
-        headers["Range"] = range_header
+    
+    # Enforce maximum chunk size of 2MB (2,097,152 bytes)
+    # This ensures requests complete in < 500ms and never hit the 10s timeout
+    CHUNK_SIZE = 2 * 1024 * 1024
+    
+    start = 0
+    end = None
+    
+    if range_header and range_header.startswith("bytes="):
+        try:
+            parts = range_header.replace("bytes=", "").split("-")
+            start = int(parts[0]) if parts[0] else 0
+            end = int(parts[1]) if (len(parts) > 1 and parts[1]) else None
+            
+            if end is None:
+                target_end = start + CHUNK_SIZE - 1
+            else:
+                target_end = min(end, start + CHUNK_SIZE - 1)
+                
+            headers["Range"] = f"bytes={start}-{target_end}"
+        except Exception as e:
+            logger.warning(f"Error parsing range header '{range_header}': {e}")
+            headers["Range"] = range_header
+    else:
+        # Request is GET but has no range header; default to first chunk
+        if method == "GET":
+            headers["Range"] = f"bytes=0-{CHUNK_SIZE - 1}"
+        # For HEAD request without range, we do not set Range header to get full length
 
-    client = httpx.AsyncClient(follow_redirects=True, timeout=None)
+    client = httpx.AsyncClient(follow_redirects=True, timeout=15.0)
 
     try:
-        req = client.build_request("GET", url, headers=headers)
-        resp = await client.send(req, stream=True)
+        if method == "HEAD":
+            req = client.build_request("HEAD", url, headers=headers)
+            resp = await client.send(req)
+        else:
+            req = client.build_request("GET", url, headers=headers)
+            resp = await client.send(req, stream=True)
 
         send_headers = {}
         for h in ["content-type", "content-length", "content-range", "accept-ranges"]:
@@ -2489,9 +2535,15 @@ async def proxy_stream_url(url: str, request: Request):
         if "content-type" not in send_headers:
             send_headers["Content-Type"] = "video/mp4"
 
+        if method == "HEAD":
+            await resp.aclose()
+            await client.aclose()
+            from fastapi.responses import Response
+            return Response(status_code=resp.status_code, headers=send_headers)
+
         async def iterate_bytes():
             try:
-                async for chunk in resp.aiter_bytes(chunk_size=1024 * 128):
+                async for chunk in resp.aiter_bytes(chunk_size=1024 * 64):
                     yield chunk
             finally:
                 await resp.aclose()
@@ -2504,9 +2556,10 @@ async def proxy_stream_url(url: str, request: Request):
         )
     except Exception as e:
         await client.aclose()
+        logger.error(f"Error in proxy_stream_url: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/play-media/{detailPath}")
+@app.api_route("/api/v1/play-media/{detailPath}", methods=["GET", "HEAD"])
 async def play_movie_media(detailPath: str, request: Request, resolution: Optional[int] = None):
     try:
         details = await get_cached_detail(detailPath)
@@ -2530,7 +2583,7 @@ async def play_movie_media(detailPath: str, request: Request, resolution: Option
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/play-media/{detailPath}/{season}/{episode}")
+@app.api_route("/api/v1/play-media/{detailPath}/{season}/{episode}", methods=["GET", "HEAD"])
 async def play_episode_media(detailPath: str, season: int, episode: int, request: Request, resolution: Optional[int] = None):
     try:
         dl_meta = await get_cached_media_detail(detailPath, season=season, episode=episode, is_tv=True)
@@ -2546,11 +2599,11 @@ async def play_episode_media(detailPath: str, season: int, episode: int, request
         raise HTTPException(status_code=500, detail=str(e))
 
 # Backward-compatible direct video URL endpoints
-@app.get("/api/v1/play/{detailPath}/video.mp4")
+@app.api_route("/api/v1/play/{detailPath}/video.mp4", methods=["GET", "HEAD"])
 async def play_movie(detailPath: str, request: Request):
     return await play_movie_media(detailPath, request)
 
-@app.get("/api/v1/play/{detailPath}/{season}/{episode}/video.mp4")
+@app.api_route("/api/v1/play/{detailPath}/{season}/{episode}/video.mp4", methods=["GET", "HEAD"])
 async def play_episode(detailPath: str, season: int, episode: int, request: Request):
     return await play_episode_media(detailPath, season, episode, request)
 
