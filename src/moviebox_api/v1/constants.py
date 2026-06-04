@@ -117,6 +117,12 @@ class SubjectType(IntEnum):
     TV_SERIES = 2
     """TV Series content only"""
 
+    VARIETY = 3
+    """Variety shows"""
+
+    DOCUMENTARY = 4
+    """Documentary films"""
+
     EDUCATION = 5
     """Anime contents only"""
 
