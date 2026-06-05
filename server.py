@@ -67,6 +67,8 @@ INDONESIA_HEADERS = {
 }
 
 _global_session = None
+_global_v3_client = None
+_global_stream_client = None
 
 def get_global_session() -> Session:
     """Buat atau kembalikan global Session untuk HTTP connection pooling."""
@@ -74,6 +76,22 @@ def get_global_session() -> Session:
     if _global_session is None:
         _global_session = Session(headers=INDONESIA_HEADERS, timeout=30.0)
     return _global_session
+
+async def get_global_v3_client():
+    """Buat atau kembalikan global MovieBoxHttpClient (V3) dengan context manager diaktifkan."""
+    global _global_v3_client
+    if _global_v3_client is None:
+        from moviebox_api.v3.http_client import MovieBoxHttpClient
+        _global_v3_client = MovieBoxHttpClient(timeout=20.0)
+        await _global_v3_client.__aenter__()
+    return _global_v3_client
+
+def get_global_stream_client() -> httpx.AsyncClient:
+    """Buat atau kembalikan global httpx.AsyncClient untuk streaming proxy."""
+    global _global_stream_client
+    if _global_stream_client is None:
+        _global_stream_client = httpx.AsyncClient(follow_redirects=True, timeout=15.0)
+    return _global_stream_client
 # ─────────────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
@@ -95,9 +113,13 @@ app.add_middleware(
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    global _global_session
+    global _global_session, _global_v3_client, _global_stream_client
     if _global_session is not None:
-        await _global_session._client.aclose()
+        await _global_session.aclose()
+    if _global_v3_client is not None:
+        await _global_v3_client.__aexit__(None, None, None)
+    if _global_stream_client is not None:
+        await _global_stream_client.aclose()
 
 @app.middleware("http")
 async def add_cache_control_header(request: Request, call_next):
@@ -232,47 +254,46 @@ async def get_cached_detail(detailPath: str):
     if detailPath.startswith("subject-"):
         # Fetch using V3 API
         subject_id = detailPath.split("-")[-1]
-        from moviebox_api.v3.http_client import MovieBoxHttpClient
         from moviebox_api.v3.core import ItemDetails as V3ItemDetails
         
-        async with MovieBoxHttpClient() as v3_client:
-            det = V3ItemDetails(v3_client, include_seasons=True)
-            v3_details = await det.get_content_model(subject_id)
+        v3_client = await get_global_v3_client()
+        det = V3ItemDetails(v3_client, include_seasons=True)
+        v3_details = await det.get_content_model(subject_id)
             
             # Map V3 RootItemDetailsModel to a structure compatible with V2 SpecificItemDetailsModel
-            class MockSubject:
-                def __init__(self, v3_subj):
-                    self.genre = v3_subj.genre
-                    self.subjectType = v3_subj.subject_type
-                    self.title = v3_subj.title
-                    self.cover = v3_subj.cover
-                    self.description = v3_subj.description
-                    self.releaseDate = v3_subj.release_date
-                    self.imdbRatingValue = v3_subj.imdb_rating_value
-                    self.countryName = v3_subj.country_name
+        class MockSubject:
+            def __init__(self, v3_subj):
+                self.genre = v3_subj.genre
+                self.subjectType = v3_subj.subject_type
+                self.title = v3_subj.title
+                self.cover = v3_subj.cover
+                self.description = v3_subj.description
+                self.releaseDate = v3_subj.release_date
+                self.imdbRatingValue = v3_subj.imdb_rating_value
+                self.countryName = v3_subj.country_name
 
-            class MockSeason:
-                def __init__(self, se, max_ep):
-                    self.se = se
-                    self.maxEp = max_ep
+        class MockSeason:
+            def __init__(self, se, max_ep):
+                self.se = se
+                self.maxEp = max_ep
 
-            class MockResource:
-                def __init__(self, v3_seasons):
-                    self.seasons = [MockSeason(s.se, s.max_ep) for s in v3_seasons.seasons] if v3_seasons else []
+        class MockResource:
+            def __init__(self, v3_seasons):
+                self.seasons = [MockSeason(s.se, s.max_ep) for s in v3_seasons.seasons] if v3_seasons else []
 
-            class MockStar:
-                def __init__(self, staff):
-                    self.name = staff.name
-                    self.character = staff.character
-                    self.avatarUrl = staff.avatar_url
+        class MockStar:
+            def __init__(self, staff):
+                self.name = staff.name
+                self.character = staff.character
+                self.avatarUrl = staff.avatar_url
 
-            class MockDetails:
-                def __init__(self, v3_d):
-                    self.subject = MockSubject(v3_d)
-                    self.resource = MockResource(v3_d.seasons)
-                    self.stars = [MockStar(s) for s in v3_d.staff_list] if v3_d.staff_list else []
-            
-            details = MockDetails(v3_details)
+        class MockDetails:
+            def __init__(self, v3_d):
+                self.subject = MockSubject(v3_d)
+                self.resource = MockResource(v3_d.seasons)
+                self.stars = [MockStar(s) for s in v3_d.staff_list] if v3_d.staff_list else []
+        
+        details = MockDetails(v3_details)
     else:
         session = get_global_session()
         det = ItemDetails(session)
@@ -296,43 +317,41 @@ async def get_cached_media_detail(detailPath: str, season: int = None, episode: 
     if detailPath.startswith("subject-"):
         # Fetch using V3 API directly
         subject_id = detailPath.split("-")[-1]
-        from moviebox_api.v3.http_client import MovieBoxHttpClient
-        
-        async with MovieBoxHttpClient() as v3_client:
-            params = {"subjectId": subject_id}
-            if is_tv:
-                params["se"] = season if season is not None else 1
-                params["ep"] = episode if episode is not None else 1
-                
-            res_data = await v3_client.get_from_api("/wefeed-mobile-bff/subject-api/resource", params=params)
-            video_list = res_data.get("list", [])
+        v3_client = await get_global_v3_client()
+        params = {"subjectId": subject_id}
+        if is_tv:
+            params["se"] = season if season is not None else 1
+            params["ep"] = episode if episode is not None else 1
             
-            # Build mock downloads list
-            downloads = []
-            for item in video_list:
-                res_val = item.get("resolution", 720)
-                url_val = item.get("resourceLink")
-                size_val = item.get("size", 0)
-                downloads.append(MockMediaFile(res_val, url_val, size_val))
+        res_data = await v3_client.get_from_api("/wefeed-mobile-bff/subject-api/resource", params=params)
+        video_list = res_data.get("list", [])
+        
+        # Build mock downloads list
+        downloads = []
+        for item in video_list:
+            res_val = item.get("resolution", 720)
+            url_val = item.get("resourceLink")
+            size_val = item.get("size", 0)
+            downloads.append(MockMediaFile(res_val, url_val, size_val))
+            
+        captions = []
+        if video_list:
+            best_res_id = video_list[0].get("resourceId")
+            cap_params = {"subjectId": subject_id, "resourceId": best_res_id}
+            try:
+                cap_data = await v3_client.get_from_api("/wefeed-mobile-bff/subject-api/get-ext-captions", params=cap_params)
+                ext_captions = cap_data.get("extCaptions", [])
+                for cap in ext_captions:
+                    captions.append(MockCaptionFile(
+                        id_val=cap.get("id"),
+                        lan=cap.get("lan"),
+                        lanName=cap.get("lanName"),
+                        url=cap.get("url")
+                    ))
+            except Exception as e:
+                logger.warning(f"Error fetching V3 captions: {e}")
                 
-            captions = []
-            if video_list:
-                best_res_id = video_list[0].get("resourceId")
-                cap_params = {"subjectId": subject_id, "resourceId": best_res_id}
-                try:
-                    cap_data = await v3_client.get_from_api("/wefeed-mobile-bff/subject-api/get-ext-captions", params=cap_params)
-                    ext_captions = cap_data.get("extCaptions", [])
-                    for cap in ext_captions:
-                        captions.append(MockCaptionFile(
-                            id_val=cap.get("id"),
-                            lan=cap.get("lan"),
-                            lanName=cap.get("lanName"),
-                            url=cap.get("url")
-                        ))
-                except Exception as e:
-                    logger.warning(f"Error fetching V3 captions: {e}")
-                    
-            dl_meta = MockMediaDetail(downloads, captions)
+        dl_meta = MockMediaDetail(downloads, captions)
     else:
         session = get_global_session()
         details = await get_cached_detail(detailPath)
@@ -387,61 +406,74 @@ def format_item(item):
         "genres": genres
     }
 
+search_cache = {}
+SEARCH_CACHE_TTL = 300  # 5 minutes
+
 async def execute_search(query_str: str, subj_type, page: int = 1):
     """
     Melakukan pencarian dengan fallback ke V3 API jika V2 API (h5-api) down/error/400.
     """
+    cache_key = (query_str, int(subj_type), page)
+    now = time.time()
+    if cache_key in search_cache:
+        entry = search_cache[cache_key]
+        if (now - entry["timestamp"]) < SEARCH_CACHE_TTL:
+            logger.debug("[Search] Returning cached results for '%s' page %d", query_str, page)
+            return entry["data"]
+
     try:
         # Coba V2 Search terlebih dahulu
         session = get_global_session()
         search_inst = Search(session, query=query_str, subject_type=subj_type, page=page)
         search_res = await search_inst.get_content_model()
-        return [format_item(item) for item in search_res.items]
+        results = [format_item(item) for item in search_res.items]
+        search_cache[cache_key] = {"data": results, "timestamp": now}
+        return results
     except Exception as e:
         logger.warning("[Search] V2 Search failed for '%s' (error: %s). Falling back to V3 Search...", query_str, str(e))
         try:
             # Fallback ke V3 Search (Android App API)
-            from moviebox_api.v3.http_client import MovieBoxHttpClient
             from moviebox_api.v3.core import Search as V3Search
             from moviebox_api.v3.constants import SubjectType as V3SubjectType
             
             # Map V2 SubjectType to V3 SubjectType
             v3_subject_type = V3SubjectType(int(subj_type))
             
-            async with MovieBoxHttpClient() as v3_client:
-                v3_search_inst = V3Search(
-                    v3_client,
-                    query=query_str,
-                    subject_type=v3_subject_type,
-                    page=page
-                )
-                v3_res_model = await v3_search_inst.get_content_model()
+            v3_client = await get_global_v3_client()
+            v3_search_inst = V3Search(
+                v3_client,
+                query=query_str,
+                subject_type=v3_subject_type,
+                page=page
+            )
+            v3_res_model = await v3_search_inst.get_content_model()
+            
+            formatted_items = []
+            for m_item in v3_res_model.items:
+                subject_type_val = int(m_item.subject_type)
+                item_type = "tv" if subject_type_val in (2, 7, 8) else "movie"
+                rating = str(m_item.imdb_rating_value) if m_item.imdb_rating_value else "N/A"
+                year = str(m_item.release_date.year) if m_item.release_date else ""
+                poster = str(m_item.cover.url) if m_item.cover and m_item.cover.url else ""
+                detail_path = ""
+                if m_item.detail_url and "/detail/" in str(m_item.detail_url):
+                    detail_path = str(m_item.detail_url).split("/detail/")[-1]
+                elif m_item.subject_id:
+                    detail_path = f"subject-{m_item.subject_id}"
+                genres = m_item.genre or []
                 
-                formatted_items = []
-                for m_item in v3_res_model.items:
-                    subject_type_val = int(m_item.subject_type)
-                    item_type = "tv" if subject_type_val in (2, 7, 8) else "movie"
-                    rating = str(m_item.imdb_rating_value) if m_item.imdb_rating_value else "N/A"
-                    year = str(m_item.release_date.year) if m_item.release_date else ""
-                    poster = str(m_item.cover.url) if m_item.cover and m_item.cover.url else ""
-                    detail_path = ""
-                    if m_item.detail_url and "/detail/" in str(m_item.detail_url):
-                        detail_path = str(m_item.detail_url).split("/detail/")[-1]
-                    elif m_item.subject_id:
-                        detail_path = f"subject-{m_item.subject_id}"
-                    genres = m_item.genre or []
-                    
-                    formatted_items.append({
-                        "title": m_item.title,
-                        "poster": poster,
-                        "year": year,
-                        "detailPath": detail_path,
-                        "rating": rating,
-                        "type": item_type,
-                        "genres": genres
-                    })
-                logger.info("[Search] V3 Search fallback successful! Found %d items.", len(formatted_items))
-                return formatted_items
+                formatted_items.append({
+                    "title": m_item.title,
+                    "poster": poster,
+                    "year": year,
+                    "detailPath": detail_path,
+                    "rating": rating,
+                    "type": item_type,
+                    "genres": genres
+                })
+            logger.info("[Search] V3 Search fallback successful! Found %d items.", len(formatted_items))
+            search_cache[cache_key] = {"data": formatted_items, "timestamp": now}
+            return formatted_items
         except Exception as v3_err:
             logger.error("[Search] V3 Search fallback also failed: %s", str(v3_err))
             raise RuntimeError(f"Both V2 and V3 search failed. V2 error: {e}. V3 error: {v3_err}")
@@ -1469,15 +1501,28 @@ async def get_detail(detailPath: str, request: Request):
             "error": str(e)
         }
 
+subtitle_cache = {}
+
 @app.get("/api/v1/sub")
 async def proxy_subtitle(url: str):
     from urllib.parse import unquote
     target_url = unquote(url)
+    
+    if target_url in subtitle_cache:
+        logger.debug("[Subtitle] Returning cached subtitle for: %s", target_url)
+        return HTMLResponse(
+            content=subtitle_cache[target_url],
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Content-Type": "text/vtt; charset=utf-8"
+            }
+        )
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer": "https://videodownloader.site/",
     }
-    client = httpx.AsyncClient(follow_redirects=True, timeout=15.0)
+    client = get_global_stream_client()
     try:
         resp = await client.get(target_url, headers=headers)
         content = resp.text
@@ -1492,6 +1537,8 @@ async def proxy_subtitle(url: str):
             content = re.sub(r'(\d{2}:\d{2}:\d{2}),(\d{3})', r'\1.\2', content)
             content = "WEBVTT\n\n" + content
 
+        subtitle_cache[target_url] = content
+
         return HTMLResponse(
             content=content,
             status_code=resp.status_code,
@@ -1502,8 +1549,6 @@ async def proxy_subtitle(url: str):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        await client.aclose()
 
 
 @app.get("/api/v1/player", response_class=HTMLResponse)
@@ -2684,7 +2729,7 @@ async def proxy_stream_url(url: str, request: Request):
             headers["Range"] = f"bytes=0-{CHUNK_SIZE - 1}"
         # For HEAD request without range, we do not set Range header to get full length
 
-    client = httpx.AsyncClient(follow_redirects=True, timeout=15.0)
+    client = get_global_stream_client()
 
     try:
         if method == "HEAD":
@@ -2709,7 +2754,6 @@ async def proxy_stream_url(url: str, request: Request):
 
         if method == "HEAD":
             await resp.aclose()
-            await client.aclose()
             from fastapi.responses import Response
             return Response(status_code=resp.status_code, headers=send_headers)
 
@@ -2719,7 +2763,6 @@ async def proxy_stream_url(url: str, request: Request):
                     yield chunk
             finally:
                 await resp.aclose()
-                await client.aclose()
 
         return StreamingResponse(
             iterate_bytes(),
@@ -2727,7 +2770,6 @@ async def proxy_stream_url(url: str, request: Request):
             headers=send_headers,
         )
     except Exception as e:
-        await client.aclose()
         logger.error(f"Error in proxy_stream_url: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 

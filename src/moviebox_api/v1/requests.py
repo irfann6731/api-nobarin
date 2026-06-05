@@ -64,6 +64,13 @@ class Session:
             **httpx_kwargs,
         )
 
+        self._client_no_cookies = httpx.AsyncClient(
+            headers=headers,
+            timeout=timeout,
+            proxy=proxy,
+            **httpx_kwargs,
+        )
+
         self.moviebox_app_info: MovieboxAppInfo | None = None
         self.__moviebox_app_info_fetched: bool = False
         """Used to track cookies assignment status"""
@@ -91,14 +98,26 @@ class Session:
         Returns:
             Response: Httpx response object
         """
-        client = httpx.AsyncClient(
-            headers=self._headers,
-            cookies=self._cookies,
-            proxy=self._proxy,
-            timeout=self._timeout,
-            **kwargs,
-        )
-        response = await client.get(url, params=params)
+        if kwargs:
+            client = httpx.AsyncClient(
+                headers=self._headers,
+                cookies=self._cookies,
+                proxy=self._proxy,
+                timeout=self._timeout,
+                **kwargs,
+            )
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+            return self._validate_response(response)
+
+        if not hasattr(self, "_client_no_cookies"):
+            self._client_no_cookies = httpx.AsyncClient(
+                headers=self._headers,
+                timeout=self._timeout,
+                proxy=self._proxy,
+            )
+        self._client_no_cookies.cookies.clear()
+        response = await self._client_no_cookies.get(url, params=params)
         response.raise_for_status()
         return self._validate_response(response)
 
@@ -201,3 +220,9 @@ class Session:
         return self.moviebox_app_info
 
     update_session_cookies = _fetch_app_info
+
+    async def aclose(self) -> None:
+        """Close client connections"""
+        await self._client.aclose()
+        if hasattr(self, "_client_no_cookies"):
+            await self._client_no_cookies.aclose()
