@@ -74,7 +74,7 @@ def get_global_session() -> Session:
     """Buat atau kembalikan global Session untuk HTTP connection pooling."""
     global _global_session
     if _global_session is None:
-        _global_session = Session(headers=INDONESIA_HEADERS, timeout=30.0)
+        _global_session = Session(headers=INDONESIA_HEADERS, timeout=6.0)
     return _global_session
 
 async def get_global_v3_client():
@@ -82,7 +82,7 @@ async def get_global_v3_client():
     global _global_v3_client
     if _global_v3_client is None:
         from moviebox_api.v3.http_client import MovieBoxHttpClient
-        _global_v3_client = MovieBoxHttpClient(timeout=20.0)
+        _global_v3_client = MovieBoxHttpClient(timeout=6.0)
         await _global_v3_client.__aenter__()
     return _global_v3_client
 
@@ -90,7 +90,7 @@ def get_global_stream_client() -> httpx.AsyncClient:
     """Buat atau kembalikan global httpx.AsyncClient untuk streaming proxy."""
     global _global_stream_client
     if _global_stream_client is None:
-        _global_stream_client = httpx.AsyncClient(follow_redirects=True, timeout=15.0)
+        _global_stream_client = httpx.AsyncClient(follow_redirects=True, timeout=6.0)
     return _global_stream_client
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -2764,6 +2764,7 @@ async def proxy_stream_url(url: str, request: Request):
         send_headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
         send_headers["Access-Control-Allow-Headers"] = "Range, Content-Type, Origin, Accept"
         send_headers["Accept-Ranges"] = "bytes"
+        send_headers["X-Accel-Buffering"] = "no"
 
         if "content-type" not in send_headers:
             send_headers["Content-Type"] = "video/mp4"
