@@ -2312,6 +2312,33 @@ async def artplayer_page(
             console.error('[Artplayer] Failed to post ended message:', err);
           }}
         }});
+
+        // Post play event to parent window for analytics
+        video.addEventListener('play', () => {{
+          try {{
+            window.parent.postMessage({{ event: 'video:play' }}, '*');
+            console.log('[Artplayer] Video play. Posted message to parent window.');
+          }} catch (err) {{}}
+        }});
+
+        // Post pause event to parent window for analytics
+        video.addEventListener('pause', () => {{
+          try {{
+            window.parent.postMessage({{ event: 'video:pause' }}, '*');
+            console.log('[Artplayer] Video pause. Posted message to parent window.');
+          }} catch (err) {{}}
+        }});
+
+        // Post timeupdate event to parent window for progress analytics
+        video.addEventListener('timeupdate', () => {{
+          try {{
+            window.parent.postMessage({{
+              event: 'video:timeupdate',
+              currentTime: video.currentTime,
+              duration: video.duration
+            }}, '*');
+          }} catch (err) {{}}
+        }});
         
         // Preserve and apply custom playback speed across switches
         art.playbackRate = currentSpeed;
