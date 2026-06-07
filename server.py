@@ -2118,6 +2118,7 @@ async def artplayer_page(
     window.PLAYER_CONFIG = {json.dumps(config, ensure_ascii=False)};
   </script>
   <script src="{artplayer_cdn}"></script>
+  <script src="https://cdn.jsdelivr.net/npm/artplayer-plugin-auto-thumbnail/dist/artplayer-plugin-auto-thumbnail.js"></script>
   <script>
     (() => {{
       const cfg = window.PLAYER_CONFIG || {{}};
@@ -2197,6 +2198,12 @@ async def artplayer_page(
           }},
           encoding: 'utf-8',
         }},
+        plugins: [
+          artplayerPluginAutoThumbnail({{
+            number: 60,
+            width: 160,
+          }}),
+        ],
         controls: [
           {{
             name: 'custom-settings',
