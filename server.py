@@ -1560,6 +1560,7 @@ async def artplayer_page(
     detailPath: Optional[str] = None,
     season: Optional[int] = None,
     episode: Optional[int] = None,
+    t: Optional[float] = 0.0,
 ):
     import json
     from html import escape
@@ -1610,6 +1611,7 @@ async def artplayer_page(
         "artplayerCdn": artplayer_cdn,
         "qualities": qualities,
         "subtitles": subtitles,
+        "startTime": t or 0.0,
     }
 
     html = f'''<!doctype html>
@@ -2119,6 +2121,7 @@ async def artplayer_page(
   <script>
     (() => {{
       const cfg = window.PLAYER_CONFIG || {{}};
+      let hasJumpedToStartTime = false;
       const errorEl = document.getElementById('player-error');
       const errorTextEl = document.getElementById('player-error-text');
 
@@ -2296,6 +2299,17 @@ async def artplayer_page(
         video.setAttribute('playsinline', '');
         video.setAttribute('webkit-playsinline', '');
         errorEl.classList.remove('show');
+
+        // Seek to initial startTime once
+        if (cfg.startTime && typeof cfg.startTime === 'number' && cfg.startTime > 0 && !hasJumpedToStartTime) {{
+          hasJumpedToStartTime = true;
+          try {{
+            art.currentTime = cfg.startTime;
+            console.log('[Artplayer] Jumped to initial startTime:', cfg.startTime);
+          }} catch (err) {{
+            console.error('[Artplayer] Failed to set initial startTime:', err);
+          }}
+        }}
 
         // Post ready event to parent window
         try {{
