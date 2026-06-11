@@ -2754,10 +2754,10 @@ async def artplayer_page(
     )
 
 
-async def proxy_stream_url(url: str, request: Request):
+async def proxy_stream_url(url: str, request: Request, filename: Optional[str] = None):
     headers = {
         "Accept": "*/*",
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:137.0) Gecko/20100101 Firefox/137.0",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
         "Origin": "https://videodownloader.site/",
         "Referer": "https://videodownloader.site/",
     }
@@ -2817,6 +2817,10 @@ async def proxy_stream_url(url: str, request: Request):
         if "content-type" not in send_headers:
             send_headers["Content-Type"] = "video/mp4"
 
+        if filename:
+            safe_filename = quote(filename)
+            send_headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{safe_filename}"
+
         if method == "HEAD":
             await resp.aclose()
             from fastapi.responses import Response
@@ -2839,7 +2843,7 @@ async def proxy_stream_url(url: str, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.api_route("/api/v1/play-media/{detailPath}", methods=["GET", "HEAD"])
-async def play_movie_media(detailPath: str, request: Request, resolution: Optional[int] = None):
+async def play_movie_media(detailPath: str, request: Request, resolution: Optional[int] = None, download: Optional[int] = None):
     try:
         details = await get_cached_detail(detailPath)
         subject_type_val = details.subject.subjectType.value if hasattr(details.subject.subjectType, 'value') else int(details.subject.subjectType)
@@ -2848,7 +2852,7 @@ async def play_movie_media(detailPath: str, request: Request, resolution: Option
             first_season = 1
             if details.resource and details.resource.seasons:
                 first_season = details.resource.seasons[0].se
-            return await play_episode_media(detailPath, first_season, 1, request, resolution)
+            return await play_episode_media(detailPath, first_season, 1, request, resolution, download)
 
         dl_meta = await get_cached_media_detail(detailPath, is_tv=False)
         if resolution:
@@ -2858,13 +2862,17 @@ async def play_movie_media(detailPath: str, request: Request, resolution: Option
                 target_file = dl_meta.best_media_file
         else:
             target_file = dl_meta.best_media_file
-        return await proxy_stream_url(str(target_file.url), request)
+
+        filename = f"{details.subject.title}.mp4"
+        filename = re.sub(r'[\\/*?:"<>|]', "", filename)
+        return await proxy_stream_url(str(target_file.url), request, filename=filename if download else None)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.api_route("/api/v1/play-media/{detailPath}/{season}/{episode}", methods=["GET", "HEAD"])
-async def play_episode_media(detailPath: str, season: int, episode: int, request: Request, resolution: Optional[int] = None):
+async def play_episode_media(detailPath: str, season: int, episode: int, request: Request, resolution: Optional[int] = None, download: Optional[int] = None):
     try:
+        details = await get_cached_detail(detailPath)
         dl_meta = await get_cached_media_detail(detailPath, season=season, episode=episode, is_tv=True)
         if resolution:
             try:
@@ -2873,18 +2881,21 @@ async def play_episode_media(detailPath: str, season: int, episode: int, request
                 target_file = dl_meta.best_media_file
         else:
             target_file = dl_meta.best_media_file
-        return await proxy_stream_url(str(target_file.url), request)
+
+        filename = f"{details.subject.title} - S{season}E{episode}.mp4"
+        filename = re.sub(r'[\\/*?:"<>|]', "", filename)
+        return await proxy_stream_url(str(target_file.url), request, filename=filename if download else None)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 # Backward-compatible direct video URL endpoints
 @app.api_route("/api/v1/play/{detailPath}/video.mp4", methods=["GET", "HEAD"])
-async def play_movie(detailPath: str, request: Request):
-    return await play_movie_media(detailPath, request)
+async def play_movie(detailPath: str, request: Request, download: Optional[int] = None):
+    return await play_movie_media(detailPath, request, download=download)
 
 @app.api_route("/api/v1/play/{detailPath}/{season}/{episode}/video.mp4", methods=["GET", "HEAD"])
-async def play_episode(detailPath: str, season: int, episode: int, request: Request):
-    return await play_episode_media(detailPath, season, episode, request)
+async def play_episode(detailPath: str, season: int, episode: int, request: Request, download: Optional[int] = None):
+    return await play_episode_media(detailPath, season, episode, request, download=download)
 
 
 # ── Telegram Bot Webhook Endpoint ─────────────────────────────────────────────
