@@ -21,6 +21,8 @@ os.environ.setdefault("REGION", "ID")
 os.environ.setdefault("LOCALE", "id-ID")
 # ─────────────────────────────────────────────────────────────────────────────
 
+BEARER_TOKEN = os.environ.get("BEARER_TOKEN", "97c4f4bd4ab0b5b2bda5a885d644c199")
+
 from fastapi import FastAPI, Query, HTTPException, Request, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, HTMLResponse, StreamingResponse, JSONResponse
@@ -120,6 +122,33 @@ async def shutdown_event():
         await _global_v3_client.__aexit__(None, None, None)
     if _global_stream_client is not None:
         await _global_stream_client.aclose()
+
+@app.middleware("http")
+async def token_auth_middleware(request: Request, call_next):
+    path = request.url.path
+    if path.startswith("/api/v1/"):
+        auth_header = request.headers.get("authorization")
+        token_valid = False
+        if auth_header:
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:]
+                if token == BEARER_TOKEN:
+                    token_valid = True
+            elif auth_header == BEARER_TOKEN:
+                token_valid = True
+        
+        if not token_valid:
+            token_param = request.query_params.get("token") or request.query_params.get("bearer")
+            if token_param == BEARER_TOKEN:
+                token_valid = True
+                
+        if not token_valid:
+            return JSONResponse(
+                status_code=401,
+                content={"success": False, "detail": "Unauthorized: Invalid or missing Bearer token"}
+            )
+            
+    return await call_next(request)
 
 @app.middleware("http")
 async def add_cache_control_header(request: Request, call_next):
@@ -1444,11 +1473,11 @@ async def get_detail(detailPath: str, request: Request):
             first_season = 1
             if details.resource and details.resource.seasons:
                 first_season = details.resource.seasons[0].se
-            media_url = f"{base_url}/api/v1/play-media/{detailPath}/{first_season}/1"
-            player_url = f"{base_url}/api/v1/player?detailPath={detailPath}&season={first_season}&episode=1&url={quote(media_url)}&title={encoded_title}%20-%20S{first_season}E1&poster={encoded_poster}"
+            media_url = f"{base_url}/api/v1/play-media/{detailPath}/{first_season}/1?token={BEARER_TOKEN}"
+            player_url = f"{base_url}/api/v1/player?detailPath={detailPath}&season={first_season}&episode=1&url={quote(media_url)}&title={encoded_title}%20-%20S{first_season}E1&poster={encoded_poster}&token={BEARER_TOKEN}"
         else:
-            media_url = f"{base_url}/api/v1/play-media/{detailPath}"
-            player_url = f"{base_url}/api/v1/player?detailPath={detailPath}&url={quote(media_url)}&title={encoded_title}&poster={encoded_poster}"
+            media_url = f"{base_url}/api/v1/play-media/{detailPath}?token={BEARER_TOKEN}"
+            player_url = f"{base_url}/api/v1/player?detailPath={detailPath}&url={quote(media_url)}&title={encoded_title}&poster={encoded_poster}&token={BEARER_TOKEN}"
         
         cast_list = []
         if details.stars:
@@ -1478,8 +1507,8 @@ async def get_detail(detailPath: str, request: Request):
                 season_num = season.se
                 episodes_list = []
                 for ep_idx in range(1, season.maxEp + 1):
-                    ep_media_url = f"{base_url}/api/v1/play-media/{detailPath}/{season_num}/{ep_idx}"
-                    ep_player_url = f"{base_url}/api/v1/player?detailPath={detailPath}&season={season_num}&episode={ep_idx}&url={quote(ep_media_url)}&title={encoded_title}%20-%20S{season_num}E{ep_idx}&poster={encoded_poster}"
+                    ep_media_url = f"{base_url}/api/v1/play-media/{detailPath}/{season_num}/{ep_idx}?token={BEARER_TOKEN}"
+                    ep_player_url = f"{base_url}/api/v1/player?detailPath={detailPath}&season={season_num}&episode={ep_idx}&url={quote(ep_media_url)}&title={encoded_title}%20-%20S{season_num}E{ep_idx}&poster={encoded_poster}&token={BEARER_TOKEN}"
                     episodes_list.append({
                         "episode": ep_idx,
                         "url": ep_player_url,
@@ -1593,7 +1622,7 @@ async def artplayer_page(
 
             if dl_meta.captions:
                 for caption in dl_meta.captions:
-                    proxy_sub_url = f"/api/v1/sub?url={quote(str(caption.url))}"
+                    proxy_sub_url = f"/api/v1/sub?url={quote(str(caption.url))}&token={BEARER_TOKEN}"
                     subtitles.append({
                         "id": caption.id,
                         "lan": caption.lan,
