@@ -127,6 +127,10 @@ async def shutdown_event():
 async def token_auth_middleware(request: Request, call_next):
     path = request.url.path
     if path.startswith("/api/v1/"):
+        # Bypass authentication for Telegram webhook
+        if path == "/api/v1/telegram-webhook":
+            return await call_next(request)
+            
         auth_header = request.headers.get("authorization")
         token_valid = False
         if auth_header:
@@ -2928,6 +2932,10 @@ async def play_episode(detailPath: str, season: int, episode: int, request: Requ
 
 
 # ── Telegram Bot Webhook Endpoint ─────────────────────────────────────────────
+@app.get("/api/v1/telegram-webhook")
+async def telegram_webhook_status():
+    return {"status": "Telegram Webhook is active and running"}
+
 @app.post("/api/v1/telegram-webhook")
 async def telegram_webhook(request: Request):
     import html
