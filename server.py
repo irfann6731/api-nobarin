@@ -2978,7 +2978,7 @@ async def telegram_webhook(request: Request):
         welcome_text = (
             "👋 <b>Halo! Selamat datang di Nobarin Bot.</b>\n\n"
             "Gunakan perintah <code>!s &lt;judul film&gt;</code> atau <code>/search &lt;judul film&gt;</code> untuk mencari film/serial TV.\n\n"
-            "Atau klik tombol di bawah untuk membuka **Nobarin Mini App** langsung di Telegram!"
+            "Atau klik tombol di bawah untuk membuka Nobarin Mini App langsung di Telegram!"
         )
         reply_markup = {
             "inline_keyboard": [
@@ -3000,8 +3000,25 @@ async def telegram_webhook(request: Request):
         elif text.startswith("/search "):
             query_str = text[8:].strip()
             
+        # Tombol WebApp default yang selalu ditampilkan di bawah pesan
+        default_reply_markup = {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": "🎬 Buka Nobarin Mini App",
+                        "url": "https://t.me/NobarinAdminBot/NobarinWebApp"
+                    }
+                ]
+            ]
+        }
+            
         if not query_str:
-            await send_telegram_message(chat_id, "⚠️ Silakan masukkan judul film. Contoh: <code>!s avatar</code>", message_thread_id)
+            await send_telegram_message(
+                chat_id, 
+                "⚠️ Silakan masukkan judul film. Contoh: <code>!s avatar</code>", 
+                message_thread_id, 
+                reply_markup=default_reply_markup
+            )
             return {"success": True}
             
         try:
@@ -3009,7 +3026,12 @@ async def telegram_webhook(request: Request):
             items = await execute_search(query_str, SubjectType.ALL, page=1)
             
             if not items:
-                await send_telegram_message(chat_id, f"❌ Tidak ditemukan hasil untuk <b>{html.escape(query_str)}</b>.", message_thread_id)
+                await send_telegram_message(
+                    chat_id, 
+                    f"❌ Tidak ditemukan hasil untuk <b>{html.escape(query_str)}</b>.", 
+                    message_thread_id, 
+                    reply_markup=default_reply_markup
+                )
                 return {"success": True}
                 
             # Ambil maksimal 10 item untuk ditampilkan di chat Telegram
@@ -3051,10 +3073,10 @@ async def telegram_webhook(request: Request):
                         }
                     ])
             
-            # Tambahkan tombol untuk membuka halaman utama webapp
+            # Tambahkan tombol utama untuk membuka halaman utama webapp di bawah daftar film
             inline_keyboard.append([
                 {
-                    "text": "🌐 Buka Beranda Nobarin",
+                    "text": "🎬 Buka Nobarin Mini App",
                     "url": "https://t.me/NobarinAdminBot/NobarinWebApp"
                 }
             ])
