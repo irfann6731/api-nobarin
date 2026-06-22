@@ -127,7 +127,8 @@ async def shutdown_event():
 async def token_auth_middleware(request: Request, call_next):
     path = request.url.path
     if path.startswith("/api/v1/"):
-        # Bypass authentication for Telegram webhook
+        # === KODE KHUSUS BOT TELEGRAM: Bypass Autentikasi Webhook ===
+        # Membuka akses tanpa token/autentikasi khusus untuk webhook Telegram agar Telegram bisa mengirimkan update.
         if path == "/api/v1/telegram-webhook":
             return await call_next(request)
             
@@ -2931,11 +2932,18 @@ async def play_episode(detailPath: str, season: int, episode: int, request: Requ
     return await play_episode_media(detailPath, season, episode, request, download=download)
 
 
-# ── Telegram Bot Webhook Endpoint ─────────────────────────────────────────────
+# ── KODE KHUSUS BOT TELEGRAM ──────────────────────────────────────────────────
+# Bagian ini berisi endpoint webhook dan fungsi pengiriman pesan untuk Bot Telegram Anda.
+
+# 1. Endpoint status webhook Telegram (GET)
+# Digunakan untuk memeriksa apakah webhook aktif
 @app.get("/api/v1/telegram-webhook")
 async def telegram_webhook_status():
     return {"status": "Telegram Webhook is active and running"}
 
+# 2. Endpoint penerima webhook Telegram (POST)
+# Endpoint ini menerima pesan masuk dari pengguna di Telegram, memproses perintah
+# /start, !s <judul>, dan /search <judul>, lalu mengirimkan daftar hasil film kembali ke Telegram.
 @app.post("/api/v1/telegram-webhook")
 async def telegram_webhook(request: Request):
     import html
@@ -2965,17 +2973,26 @@ async def telegram_webhook(request: Request):
     if not text:
         return {"success": True}
         
-    # Command /start
+    # --- MENANGGAPI PERINTAH /start ---
     if text == "/start":
         welcome_text = (
             "👋 <b>Halo! Selamat datang di Nobarin Bot.</b>\n\n"
             "Gunakan perintah <code>!s &lt;judul film&gt;</code> atau <code>/search &lt;judul film&gt;</code> untuk mencari film/serial TV.\n\n"
-            "Contoh:\n"
-            "<code>!s avatar</code>"
+            "Atau klik tombol di bawah untuk membuka **Nobarin Mini App** langsung di Telegram!"
         )
-        await send_telegram_message(chat_id, welcome_text, message_thread_id)
+        reply_markup = {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": "🎬 Buka Nobarin Mini App",
+                        "url": "https://t.me/NobarinAdminBot/NobarinWebApp"
+                    }
+                ]
+            ]
+        }
+        await send_telegram_message(chat_id, welcome_text, message_thread_id, reply_markup=reply_markup)
         
-    # Command !s atau /search
+    # --- MENANGGAPI PERINTAH !s ATAU /search ---
     elif text.startswith("!s ") or text.startswith("/search "):
         query_str = ""
         if text.startswith("!s "):
@@ -2988,21 +3005,22 @@ async def telegram_webhook(request: Request):
             return {"success": True}
             
         try:
+            # Melakukan pencarian film ke API internal
             items = await execute_search(query_str, SubjectType.ALL, page=1)
             
             if not items:
                 await send_telegram_message(chat_id, f"❌ Tidak ditemukan hasil untuk <b>{html.escape(query_str)}</b>.", message_thread_id)
                 return {"success": True}
                 
-            # Ambil maksimal 10 item untuk ditampilkan
+            # Ambil maksimal 10 item untuk ditampilkan di chat Telegram
             results_to_show = items[:10]
             total_found = len(items)
             
             response_text = f"🔍 <b>Results for {html.escape(query_str)} ({len(results_to_show)} of {total_found}):</b>\n\n"
             
-            # Gunakan URL website Nobarin dari env (default ke nobarin.netlify.app)
             website_url = os.getenv("NOBARIN_WEBSITE_URL", "https://nobarin.netlify.app").rstrip("/")
             
+            inline_keyboard = []
             for idx, item in enumerate(results_to_show, 1):
                 title = html.escape(item.get("title", "Unknown"))
                 year = item.get("year", "")
@@ -3011,13 +3029,41 @@ async def telegram_webhook(request: Request):
                 item_type = "TV" if item.get("type") == "tv" else "Movie"
                 detail_path = item.get("detailPath", "")
                 
-                # Format URL Detail/Watch sesuai struktur website Nobarin Anda
+                # Format URL menonton langsung ke web Nobarin
                 watch_link = f"{website_url}/nonton/{detail_path}" if detail_path else "#"
                 
                 response_text += f"{idx}. <b>{title}</b>{year_str} - <i>{item_type}</i>\n"
                 response_text += f"🔗 <a href='{watch_link}'>Nonton di Nobarin</a>\n\n"
                 
-            await send_telegram_message(chat_id, response_text, message_thread_id)
+                if detail_path:
+                    # Parameter Telegram startapp hanya boleh berisi karakter a-zA-Z0-9_- (maksimal 64 karakter)
+                    # Kami mengubah slash '/' menjadi double underscore '__' agar valid dan bisa diparsing frontend
+                    cleaned_path = detail_path.replace("/", "__")
+                    if len(cleaned_path) <= 64:
+                        movie_webapp_url = f"https://t.me/NobarinAdminBot/NobarinWebApp?startapp={cleaned_path}"
+                    else:
+                        movie_webapp_url = "https://t.me/NobarinAdminBot/NobarinWebApp"
+                        
+                    inline_keyboard.append([
+                        {
+                            "text": f"🍿 Nonton {title}{year_str}",
+                            "url": movie_webapp_url
+                        }
+                    ])
+            
+            # Tambahkan tombol untuk membuka halaman utama webapp
+            inline_keyboard.append([
+                {
+                    "text": "🌐 Buka Beranda Nobarin",
+                    "url": "https://t.me/NobarinAdminBot/NobarinWebApp"
+                }
+            ])
+            
+            reply_markup = {
+                "inline_keyboard": inline_keyboard
+            }
+            
+            await send_telegram_message(chat_id, response_text, message_thread_id, reply_markup=reply_markup)
             
         except Exception as e:
             logger.error(f"Error in telegram search webhook: {e}")
@@ -3025,7 +3071,9 @@ async def telegram_webhook(request: Request):
             
     return {"success": True}
 
-async def send_telegram_message(chat_id: int, text: str, message_thread_id: Optional[int] = None):
+# 3. Fungsi untuk mengirimkan pesan ke Telegram API
+# Fungsi ini mengirim pesan format HTML menggunakan token bot Telegram dari variable lingkungan (env).
+async def send_telegram_message(chat_id: int, text: str, message_thread_id: Optional[int] = None, reply_markup: Optional[dict] = None):
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not bot_token:
         logger.error("TELEGRAM_BOT_TOKEN environment variable not set")
@@ -3040,6 +3088,8 @@ async def send_telegram_message(chat_id: int, text: str, message_thread_id: Opti
     }
     if message_thread_id is not None:
         payload["message_thread_id"] = message_thread_id
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
         
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
